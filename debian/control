@@ -1,0 +1,35 @@
+Source: tapir
+Section: web
+Priority: optional
+Maintainer: Jörg Bernau <Joerg.Bernau@onesimus.io>
+Build-Depends: debhelper-compat (= 13),
+               ca-certificates,
+               curl,
+               gettext,
+               nodejs,
+               npm
+Standards-Version: 4.7.0
+Homepage: https://github.com/FoodCoopX/wirgarten-tapir
+Rules-Requires-Root: no
+
+Package: tapir
+Architecture: amd64
+Depends: ${misc:Depends},
+         adduser,
+         fonts-dejavu-core,
+         libfontconfig1,
+         libglib2.0-0t64,
+         libharfbuzz-subset0,
+         libpango-1.0-0,
+         libpangoft2-1.0-0,
+         locales,
+         nodejs
+Recommends: postgresql, redis-server
+Suggests: nginx | caddy
+Description: Member and subscription management for solidarity farms (WirGarten)
+ Tapir manages members, subscriptions, coop shares, deliveries and payments.
+ .
+ This package is self-contained: it ships its own CPython, a virtualenv with
+ all Python dependencies and the built frontend under /opt/tapir. It provides
+ systemd units for gunicorn, the celery worker and celery beat (tapir.target).
+ Configuration lives in /etc/tapir/tapir.env, state in /var/lib/tapir.

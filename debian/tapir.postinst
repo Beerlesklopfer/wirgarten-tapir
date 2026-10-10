@@ -1,0 +1,37 @@
+#!/bin/sh
+set -e
+
+ENV_FILE=/etc/tapir/tapir.env
+
+if [ "$1" = configure ]; then
+    if ! getent passwd tapir >/dev/null; then
+        adduser --system --group --home /var/lib/tapir --no-create-home tapir
+    fi
+
+    for dir in /var/lib/tapir /var/lib/tapir/media /var/lib/tapir/filepond_temp_uploads \
+               /var/lib/tapir/filepond_stored_uploads /var/lib/tapir/emails_from_celery /var/log/tapir; do
+        install -d -o tapir -g tapir -m 0750 "$dir"
+    done
+
+    # Not a conffile: generated once with a random secret, then owned by the admin
+    if [ ! -e "$ENV_FILE" ]; then
+        install -d -m 0755 /etc/tapir
+        secret="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 64)"
+        sed "s/@SECRET_KEY@/$secret/" /usr/share/tapir/tapir.env.example > "$ENV_FILE"
+        chown root:tapir "$ENV_FILE"
+        chmod 0640 "$ENV_FILE"
+        echo "tapir: created $ENV_FILE - configure it, run 'tapir-manage migrate', then 'systemctl start tapir.target'."
+    fi
+
+    if [ -n "$2" ] && grep -qx 'TAPIR_MIGRATE_ON_UPGRADE=true' "$ENV_FILE"; then
+        tapir-manage migrate --noinput || echo "tapir: WARNING: migrate failed, run 'tapir-manage migrate' manually." >&2
+    fi
+fi
+
+#DEBHELPER#
+
+if [ "$1" = configure ] && [ -n "$2" ] && [ -d /run/systemd/system ]; then
+    deb-systemd-invoke try-restart tapir.target >/dev/null || true
+fi
+
+exit 0

@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = purge ]; then
+    rm -rf /etc/tapir /var/log/tapir
+    echo "tapir: /var/lib/tapir (uploads) and the database were kept."
+fi
+
+#DEBHELPER#
+
+exit 0

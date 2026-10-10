@@ -1,0 +1,9 @@
+#!/bin/sh
+# Runs Django's manage.py as the tapir user with the packaged configuration.
+set -e
+cd /opt/tapir/app
+cmd="set -a; . /opt/tapir/version.env; . /etc/tapir/tapir.env; set +a; exec /opt/tapir/venv/bin/python manage.py \"\$@\""
+if [ "$(id -u)" = 0 ]; then
+    exec setpriv --reuid=tapir --regid=tapir --init-groups sh -c "$cmd" tapir-manage "$@"
+fi
+exec sh -c "$cmd" tapir-manage "$@"

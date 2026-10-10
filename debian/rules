@@ -1,0 +1,34 @@
+#!/usr/bin/make -f
+
+export TAPIR_PREFIX := /opt/tapir
+export TAPIR_VERSION ?= $(shell dpkg-parsechangelog -SVersion)
+
+%:
+	dh $@
+
+# The bundled venv must be built at its final path, see packaging/build-venv.sh
+override_dh_auto_build:
+	packaging/build-venv.sh
+
+override_dh_auto_install:
+	mkdir -p debian/tapir/opt
+	cp -a $(TAPIR_PREFIX) debian/tapir/opt/
+	install -D -m 0755 packaging/tapir-manage debian/tapir/usr/bin/tapir-manage
+	install -D -m 0644 packaging/tapir.env.example debian/tapir/usr/share/tapir/tapir.env.example
+
+override_dh_auto_test override_dh_auto_clean:
+
+override_dh_installsystemd:
+	dh_installsystemd --name=tapir --no-start
+	dh_installsystemd --name=tapir-web --no-enable --no-start
+	dh_installsystemd --name=tapir-celery --no-enable --no-start
+	dh_installsystemd --name=tapir-celery-beat --no-enable --no-start
+
+# Prebuilt CPython and wheels: leave binaries, permissions and deps alone
+override_dh_strip override_dh_dwz override_dh_shlibdeps override_dh_strip_nondeterminism:
+
+override_dh_fixperms:
+	dh_fixperms --exclude opt/tapir
+
+override_dh_builddeb:
+	dh_builddeb -- -Zzstd

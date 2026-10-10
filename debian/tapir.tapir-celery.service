@@ -1,0 +1,24 @@
+[Unit]
+Description=Tapir celery worker
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+PartOf=tapir.target
+
+[Service]
+User=tapir
+Group=tapir
+WorkingDirectory=/opt/tapir/app
+EnvironmentFile=/opt/tapir/version.env
+EnvironmentFile=/etc/tapir/tapir.env
+Environment=PATH=/opt/tapir/venv/bin:/opt/tapir/mjml/node_modules/.bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tapir /var/log/tapir
+ExecStart=/opt/tapir/venv/bin/celery -A tapir worker -l info
+
+[Install]
+WantedBy=tapir.target
