@@ -27,7 +27,8 @@ apt-ftparchive \
     -o "APT::FTPArchive::Release::Codename=$SUITE" \
     -o "APT::FTPArchive::Release::Architectures=$ARCH" \
     -o "APT::FTPArchive::Release::Components=$COMPONENT" \
-    release "dists/$SUITE" > "dists/$SUITE/Release"
+    release "dists/$SUITE" > Release.tmp
+mv Release.tmp "dists/$SUITE/Release"
 
 if [ -n "$KEY_ID" ]; then
     gpg --batch --yes --local-user "$KEY_ID" --clearsign -o "dists/$SUITE/InRelease" "dists/$SUITE/Release"

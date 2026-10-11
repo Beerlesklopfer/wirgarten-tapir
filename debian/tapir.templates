@@ -1,0 +1,58 @@
+Template: tapir/site_url
+Type: string
+Default: http://localhost:8000
+Description: Public URL of Tapir:
+ The address members use to reach Tapir, e.g. https://tapir.example.org.
+ The host name is also used as ALLOWED_HOSTS.
+
+Template: tapir/database_auto
+Type: boolean
+Default: true
+Description: Create the PostgreSQL database automatically?
+ If PostgreSQL runs on this machine, the package can create a "tapir" role
+ and database with a random password. Choose no to use an existing database.
+
+Template: tapir/database_url
+Type: string
+Default: postgresql://tapir:CHANGE_ME@localhost:5432/tapir
+Description: Database connection URL:
+ Format: postgresql://USER:PASSWORD@HOST:PORT/DATABASE. Special characters in
+ the password must be URL-encoded (e.g. @ as %40).
+
+Template: tapir/redis_url
+Type: string
+Default: redis://localhost:6379
+Description: Redis URL for celery:
+
+Template: tapir/keycloak_admin_url
+Type: string
+Default: http://localhost:8080
+Description: Keycloak URL used by the server:
+ Internal address under which Tapir reaches the Keycloak admin API.
+
+Template: tapir/keycloak_public_url
+Type: string
+Default: http://localhost:8080
+Description: Public Keycloak URL:
+ Address of Keycloak as seen by members' browsers.
+
+Template: tapir/keycloak_realm
+Type: string
+Default: tapir
+Description: Keycloak realm:
+
+Template: tapir/keycloak_client_id
+Type: string
+Default: tapir-backend
+Description: Keycloak client ID:
+
+Template: tapir/keycloak_client_secret
+Type: password
+Description: Keycloak client secret:
+ Leave empty to keep the current value.
+
+Template: tapir/gunicorn_bind
+Type: string
+Default: 127.0.0.1:8000
+Description: Address the web server listens on:
+ Put a reverse proxy (nginx, caddy) with TLS in front of it.

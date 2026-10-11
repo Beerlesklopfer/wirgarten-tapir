@@ -24,7 +24,7 @@ sudo apt update && sudo apt install tapir
 Then edit `/etc/tapir/tapir.env` (database, redis, keycloak, mail), and run:
 
 ```sh
-sudo tapir-manage migrate
+sudo tapir-manage migrate && sudo tapir-manage parameter_definitions
 sudo systemctl enable --now tapir.target
 ```
 
