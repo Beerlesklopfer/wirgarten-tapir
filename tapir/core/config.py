@@ -48,10 +48,12 @@ THEME_SCHINKELER_HOEFE = "sch"
 THEME_FALKENHOF = "fkh"
 THEME_HECKENGAEU = "hkg"
 THEME_ACKERNATIVE = "ack"
+THEME_ACKERVIELFALT = "akv"
 
 
 THEME_OPTIONS = [
     (THEME_ACKERNATIVE, "Ackernative"),
+    (THEME_ACKERVIELFALT, "Solawi Ackervielfalt"),
     (THEME_ALFTER, "Alfter"),
     (THEME_AUERGARDEN, "Auergarden"),
     (THEME_BIOTOP, "Biotop Oberland"),
