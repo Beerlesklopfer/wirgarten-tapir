@@ -15,11 +15,14 @@ files and mjml are bundled under `/opt/tapir`.
 ## Install from the APT repository
 
 ```sh
-sudo curl -fsSLo /usr/share/keyrings/tapir-archive-keyring.gpg https://<owner>.github.io/<repo>/tapir-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/tapir-archive-keyring.gpg] https://<owner>.github.io/<repo> trixie main" \
+sudo curl -fsSLo /usr/share/keyrings/tapir-archive-keyring.gpg https://beerlesklopfer.github.io/wirgarten-tapir/tapir-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/tapir-archive-keyring.gpg] https://beerlesklopfer.github.io/wirgarten-tapir trixie main" \
   | sudo tee /etc/apt/sources.list.d/tapir.list
 sudo apt update && sudo apt install tapir
 ```
+
+Key fingerprint: `2B97 87BD C831 F2CD 9651  D7EA 341B FAD2 DE6A AC6C`. For a fork, replace
+`beerlesklopfer.github.io/wirgarten-tapir` with `<owner>.github.io/<repo>`.
 
 Then edit `/etc/tapir/tapir.env` (database, redis, keycloak, mail), and run:
 

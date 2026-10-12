@@ -57,6 +57,39 @@ to run tests from your IDE. To do that:
 If you want a fresh setup, for example after switching branches, the equivalent of `./scripts/reset_all_containers.sh`
 is `./scripts/reset_and_start_local_server.sh`
 
+## Installing on Debian (APT repository)
+
+For production use, Tapir is available as a self-contained Debian package for Debian 13 (trixie, amd64). It bundles
+Python, all dependencies and the built frontend under `/opt/tapir`; PostgreSQL, Redis and Keycloak run separately.
+The CI publishes a signed APT repository on GitHub Pages: https://beerlesklopfer.github.io/wirgarten-tapir
+
+Add the repository and install the package:
+
+```sh
+sudo curl -fsSLo /usr/share/keyrings/tapir-archive-keyring.gpg \
+  https://beerlesklopfer.github.io/wirgarten-tapir/tapir-archive-keyring.gpg
+gpg --show-keys --with-fingerprint /usr/share/keyrings/tapir-archive-keyring.gpg
+# expected: 2B97 87BD C831 F2CD 9651  D7EA 341B FAD2 DE6A AC6C
+echo "deb [signed-by=/usr/share/keyrings/tapir-archive-keyring.gpg] https://beerlesklopfer.github.io/wirgarten-tapir trixie main" \
+  | sudo tee /etc/apt/sources.list.d/tapir.list
+sudo apt update
+sudo apt install tapir
+```
+
+During installation, debconf asks for the public URL, the database (optionally created automatically), Redis,
+Keycloak (URLs, realm, client ID and secret) and the listen address of gunicorn. The answers are written to
+`/etc/tapir/tapir.env`; change them later with `sudo dpkg-reconfigure tapir`. Once the database is configured, the
+package runs `migrate` and `parameter_definitions` itself. If you configured the database by hand afterwards, run:
+
+```sh
+sudo tapir-manage migrate && sudo tapir-manage parameter_definitions
+sudo systemctl enable --now tapir.target
+```
+
+Updates come with `sudo apt update && sudo apt upgrade`; the package migrates the database and restarts
+`tapir.target`. A locally built package (`packaging/build-deb.sh`) is installed with `sudo apt install ./build-deb/tapir_*.deb`.
+Details on paths, building and the CI setup: [packaging/README.md](packaging/README.md).
+
 ## Contributing & GitHub issues
 
 You are very welcome to try Tapir locally with the "Getting started" instructions above and do your own thing. The
