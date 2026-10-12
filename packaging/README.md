@@ -78,6 +78,13 @@ A Keycloak login alone does not open Tapir; staff accounts are created with
 internal: `ssh -L 8800:127.0.0.1:8800 root@<server>`, http://localhost:8800/admin, user `admin`, password in
 `/etc/tapir/keycloak.env`.
 
+## Parameters locked in the web UI
+
+Outside debug instances Tapir locks some base settings in the web UI: share price, automatic renewal, notice
+period and its unit, trial period, legal status, picking mode. `tapir-instance param <name>` lists them,
+`tapir-instance param <name> <key>` shows one with its options, `tapir-instance param <name> <key> <value>` sets
+it (checked against datatype, options and validators), `--all` lists every parameter.
+
 ## Theme
 
 `tapir-instance theme <name> <theme>` (e.g. `akv`) sets the Tapir parameter `organisation.theme`, remembers the

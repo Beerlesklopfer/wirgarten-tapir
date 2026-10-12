@@ -13,6 +13,7 @@
 #   tapir-instance manage <name> <manage.py arguments>                   e.g. createsuperuser, shell
 #   tapir-instance user-add <name> <mail> [--admin] [--first <name>] [--last <name>]
 #   tapir-instance theme <name> <theme>                                 theme of Tapir and of the Keycloak login pages and mails
+#   tapir-instance param <name> [--all | <key> [<value>]]             show/set Tapir parameters, also those locked in the web UI
 #   tapir-instance remove <name> [--purge]                              --purge also drops database and data
 #
 # Every instance gets: /etc/tapir/instances/<name>.env, data in /var/lib/tapir/<name>, the systemd units
@@ -769,6 +770,64 @@ TapirParameter.objects.filter(key='organisation.theme').update(value='$theme')
     fi
 }
 
+# Tapir locks some base settings in the web UI outside debug instances (share price, automatic
+# renewal, notice period, trial period, legal status, picking mode); they are set here, checked
+# against datatype, options and validators of the parameter definition
+cmd_param() {  # name [--all | key [value]]
+    local name="${1:-}" key="${2:-}" value="${3-}" mode
+    require_instance "$name"
+    if [ "$key" = --all ]; then mode=all; key=""
+    elif [ -z "$key" ]; then mode=locked
+    elif [ $# -ge 3 ]; then mode=set
+    else mode=show; fi
+    tapir_shell "$name" "
+import base64
+from tapir.configuration.models import TapirParameter, TapirParameterDatatype
+from tapir.configuration.parameter import get_parameter_meta
+mode = '$mode'
+key = base64.b64decode('$(printf '%s' "$key" | base64 -w0)').decode()
+value = base64.b64decode('$(printf '%s' "$value" | base64 -w0)').decode()
+if mode in ('locked', 'all'):
+    params = TapirParameter.objects.order_by('category', '-order_priority')
+    if mode == 'locked':
+        params = params.filter(enabled=False)
+        print('Locked in the web UI (all: tapir-instance param $name --all):')
+    for p in params:
+        print(f'  {p.key:55} {p.value!s:20} {p.label}')
+    raise SystemExit
+param = TapirParameter.objects.filter(key=key).first()
+if param is None:
+    raise SystemExit(f'unknown parameter {key} - list: tapir-instance param $name --all')
+meta = get_parameter_meta(key)
+options = (meta.options or (meta.options_callable() if meta.options_callable else None)) if meta else None
+if mode == 'show':
+    locked = '' if param.enabled else ', locked in the web UI'
+    print(f'{param.key}: {param.value}  ({param.label}, {param.datatype}{locked})')
+    if param.description:
+        print(f'  {param.description}')
+    if options:
+        print('  options: ' + ', '.join(f'{k} ({v})' for k, v in options))
+    raise SystemExit
+if param.datatype == TapirParameterDatatype.BOOLEAN.value:
+    try:
+        value = str(TapirParameter.str2bool(value))
+    except (ValueError, AttributeError):
+        raise SystemExit(f'{key} expects true or false')
+if options and value not in [str(k) for k, _ in options]:
+    raise SystemExit(f'{key} expects one of: ' + ', '.join(str(k) for k, _ in options))
+old = param.value
+param.value = value
+try:
+    typed = param.get_value()
+    for validator in (meta.validators if meta else []):
+        validator(typed)
+except Exception as error:
+    raise SystemExit(f'invalid value for {key}: {error}')
+param.save()
+print(f'{key}: {old} -> {param.value}')
+"
+}
+
 cmd_list() {
     printf '%-16s %-34s %-7s %-16s %s\n' INSTANCE DOMAIN PORT REALM STATE
     for env in "$INSTANCES"/*.env; do
@@ -861,6 +920,7 @@ main() {
                       *) die "unknown option $1" ;; esac; done
                   add_user "$name" "$email" "$admin" "$first" "$last" ;;
         theme) cmd_theme "$@" ;;
+        param) cmd_param "$@" ;;
         remove) cmd_remove "$@" ;;
         ""|-h|--help|help) sed -n '2,/^[^#]/{/^#/p}' "$0" | sed 's/^# \{0,1\}//' ;;
         *) die "unknown command $command (see: tapir-instance --help)" ;;
