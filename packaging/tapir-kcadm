@@ -24,8 +24,10 @@ KC_ENV="$TAPIR_ETC/keycloak.env"
 die() { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 env_value() { sed -n "s/^$2=//p" "$1" 2>/dev/null | tail -n 1; }
 random_string() { tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1" || true; }
-usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,/^[^#]/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
+# Only for root (the package installs it as rwxrwx--- root:root)
+[ "$(id -u)" = 0 ] || [ -n "${TAPIR_KCADM_TEST:-}" ] || die "tapir-kcadm is for root only"
 [ -r "$KC_ENV" ] || die "$KC_ENV not readable - run as root on the Tapir server"
 podman container exists tapir-keycloak 2>/dev/null || die "Keycloak container tapir-keycloak not found"
 

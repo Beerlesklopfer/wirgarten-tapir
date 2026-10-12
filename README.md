@@ -57,13 +57,14 @@ to run tests from your IDE. To do that:
 If you want a fresh setup, for example after switching branches, the equivalent of `./scripts/reset_all_containers.sh`
 is `./scripts/reset_and_start_local_server.sh`
 
-## Installing on Debian (APT repository)
+## Running in production (containers, APT)
 
-For production use, Tapir is available as a self-contained Debian package for Debian 13 (trixie, amd64). It bundles
-Python, all dependencies and the built frontend under `/opt/tapir`; PostgreSQL, Redis and Keycloak run separately.
-The CI publishes a signed APT repository on GitHub Pages: https://beerlesklopfer.github.io/wirgarten-tapir
-
-Add the repository and install the package:
+In production every Tapir instance - one per solidarity farm - runs as podman containers under systemd: web
+(gunicorn), celery worker, celery beat and redis from the production image
+(`ghcr.io/beerlesklopfer/wirgarten-tapir`, built from `docker/production/Containerfile`). One Keycloak container
+serves all instances, each with its own realm. PostgreSQL and nginx run on the host. The Debian package `tapir`
+(Debian 13 trixie, `Architecture: all`) installs the tools; a signed APT repository is published on GitHub Pages:
+https://beerlesklopfer.github.io/wirgarten-tapir
 
 ```sh
 sudo curl -fsSLo /usr/share/keyrings/tapir-archive-keyring.gpg \
@@ -73,58 +74,29 @@ gpg --show-keys --with-fingerprint /usr/share/keyrings/tapir-archive-keyring.gpg
 echo "deb [signed-by=/usr/share/keyrings/tapir-archive-keyring.gpg] https://beerlesklopfer.github.io/wirgarten-tapir trixie main" \
   | sudo tee /etc/apt/sources.list.d/tapir.list
 sudo apt update
-sudo apt install tapir
+sudo apt install tapir postgresql nginx
 ```
 
-During installation, debconf asks for the public URL, the database (optionally created automatically), Redis,
-Keycloak (URLs, realm, client ID and secret) and the listen address of gunicorn. The answers are written to
-`/etc/tapir/tapir.env`; change them later with `sudo dpkg-reconfigure tapir`. Once the database is configured, the
-package runs `migrate` and `parameter_definitions` itself. If you configured the database by hand afterwards, run:
+The installation asks for the first instance (name, public host name, local port, e-mail of the first admin) and
+sets it up completely; an installation of the earlier native package is taken over with its database and files.
+Everything else is done with the tools of the package (all for root):
 
-```sh
-sudo tapir-manage migrate && sudo tapir-manage parameter_definitions
-sudo systemctl enable --now tapir.target
-```
+| Command | Purpose |
+|---|---|
+| `tapir-instance create <name> --domain <host> --port <port> [--admin-email <mail>]` | new instance: containers, database, Keycloak realm, admin, nginx site, checks |
+| `tapir-instance list` / `status <name>` | overview / checks |
+| `tapir-instance upgrade <name>\|--all [--image <image>]` | pull the image, migrate, restart |
+| `tapir-instance user-add <name> <mail> [--admin]` | Tapir user with Keycloak login |
+| `tapir-instance adopt <name>` | take over a native installation |
+| `tapir-instance remove <name> [--purge]` | stop and remove (with `--purge` also database, realm, data) |
+| `tapir-manage <name> <manage.py args>` | e.g. `tapir-manage ackervielfalt shell` |
+| `tapir-kcadm --realm <realm> user list\|add\|passwd\|role\|group\|...` | Keycloak on the command line, realm always explicit (`rwxrwx---` root) |
 
-**nginx.** Everything is derived from the public URL. If nginx is installed and the public URL is not `localhost`, the package
-writes the site `/etc/nginx/sites-available/tapir`: HTTP→HTTPS redirect, proxy to gunicorn (`GUNICORN_BIND`) and,
-unless you answer no to "Serve the Keycloak login under the public URL", the Keycloak login paths `/realms/` and
-`/resources/` to the internal Keycloak address. `KEYCLOAK_PUBLIC_URL` and `ALLOWED_HOSTS` follow the public URL.
-The package never enables the site or reloads nginx; that stays a manual step:
-
-```sh
-sudo ln -s /etc/nginx/sites-available/tapir /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-# As long as there is no certificate, the site serves HTTP only, enough to request one:
-sudo certbot certonly --webroot -w /var/www/html -d tapir.example.org
-sudo dpkg-reconfigure tapir          # rewrites the site with HTTPS
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-The certificate defaults to `/etc/letsencrypt/live/<host>/`; other paths can be set with
-`sudo dpkg-reconfigure -p medium tapir`. Delete the first line of the site (`# Managed by the tapir package`) to keep
-local changes; the package then leaves the file alone. Keycloak itself needs `KC_HOSTNAME=<public URL>`,
-`KC_PROXY_HEADERS=xforwarded` and the redirect URI `<public URL>/*` for the `tapir-backend` client.
-
-**Keycloak.** On a fresh installation with a public URL, debconf offers to set up Keycloak on the same machine
-("Set up Keycloak on this machine?", local port, e-mail of the first admin). `tapir-setup-keycloak` then
-- runs Keycloak as podman container with the systemd unit `tapir-keycloak`, on `127.0.0.1:<port>` (default 8800),
-  with its own PostgreSQL database `keycloak`,
-- imports the realm `tapir` for the public URL with a freshly generated client secret and the Tapir login theme,
-- takes the mail server for verification and password mails from `/etc/tapir/tapir.env`,
-- connects Tapir (`SITE_URL`, `ALLOWED_HOSTS`, `KEYCLOAK_*`) and restarts it,
-- creates the first admin (initial password in `/root/tapir-initial-admin.txt`),
-- adds the Keycloak login paths to an already enabled nginx site of the domain (backup, `nginx -t`, reload) and
-  checks the result.
-
-The script is idempotent and can also be run by hand, e.g. on an existing installation:
-`sudo tapir-setup-keycloak --domain tapir.example.org --port 8800 --admin-email you@example.org`.
-Secrets are kept in `/etc/tapir/keycloak.env`. The Keycloak admin console is not public; reach it with
-`ssh -L 8800:127.0.0.1:8800 root@<server>` and http://localhost:8800/admin (user `admin`).
-
-Updates come with `sudo apt update && sudo apt upgrade`; the package migrates the database and restarts
-`tapir.target`. A locally built package (`packaging/build-deb.sh`) is installed with `sudo apt install ./build-deb/tapir_*.deb`.
-Details on paths, building and the CI setup: [packaging/README.md](packaging/README.md).
+The nginx site of an instance is written to `/etc/nginx/sites-available/tapir-<name>` (HTTP until the certificate
+exists, e.g. `certbot certonly --webroot -w /var/www/html -d <host>`, then HTTPS after `tapir-instance nginx <name>`);
+enabling it is left to you. An nginx site of the domain that is already enabled gets the Keycloak login paths added
+(with backup and `nginx -t`). The Keycloak admin console is not public; use `tapir-kcadm` or
+`ssh -L 8800:127.0.0.1:8800 root@<server>` and http://localhost:8800/admin. Details: [packaging/README.md](packaging/README.md).
 
 ## Contributing & GitHub issues
 

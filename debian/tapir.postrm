@@ -2,16 +2,8 @@
 set -e
 
 if [ "$1" = purge ]; then
-    rm -rf /etc/tapir /var/log/tapir
-    # Only the generated nginx site; an enabled link is left to the administrator
-    if [ -f /etc/nginx/sites-available/tapir ] \
-        && head -n 1 /etc/nginx/sites-available/tapir | grep -q '^# Managed by the tapir package'; then
-        if [ -L /etc/nginx/sites-enabled/tapir ]; then
-            echo "tapir: /etc/nginx/sites-enabled/tapir still points to the removed site - remove it and reload nginx."
-        fi
-        rm -f /etc/nginx/sites-available/tapir
-    fi
-    echo "tapir: /var/lib/tapir (uploads) and the database were kept."
+    echo "tapir: instances, databases, data (/var/lib/tapir) and Keycloak were kept." >&2
+    echo "tapir: remove an instance completely with 'tapir-instance remove <name> --purge' before purging." >&2
 fi
 
 #DEBHELPER#

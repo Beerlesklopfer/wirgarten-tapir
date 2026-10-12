@@ -1,105 +1,46 @@
-Template: tapir/site_url
-Type: string
-Default: http://localhost:8000
-Description: Public URL of Tapir:
- The address members use to reach Tapir, e.g. https://tapir.example.org.
- The host name is also used as ALLOWED_HOSTS.
-
-Template: tapir/database_auto
+Template: tapir/adopt
 Type: boolean
 Default: true
-Description: Create the PostgreSQL database automatically?
- If PostgreSQL runs on this machine, the package can create a "tapir" role
- and database with a random password. Choose no to use an existing database.
+Description: Move the existing Tapir installation into containers?
+ A Tapir installation of an earlier version of this package was found
+ (/etc/tapir/tapir.env). It becomes the container instance below with the
+ same database, files and port; Keycloak moves to the shared container unless
+ the configured one is reachable.
 
-Template: tapir/database_url
-Type: string
-Default: postgresql://tapir:CHANGE_ME@localhost:5432/tapir
-Description: Database connection URL:
- Format: postgresql://USER:PASSWORD@HOST:PORT/DATABASE. Special characters in
- the password must be URL-encoded (e.g. @ as %40).
-
-Template: tapir/redis_url
-Type: string
-Default: redis://localhost:6379
-Description: Redis URL for celery:
-
-Template: tapir/keycloak_setup
+Template: tapir/create_instance
 Type: boolean
 Default: true
-Description: Set up Keycloak on this machine?
- Runs tapir-setup-keycloak: Keycloak as podman container (systemd unit
- tapir-keycloak) with its own PostgreSQL database, the realm "tapir" for the
- public URL, the Keycloak login under the public URL in nginx, and Tapir
- connected to it. Choose no to use an existing Keycloak.
+Description: Create a Tapir instance now?
+ Further instances (one per solidarity farm) are created later with
+ "tapir-instance create".
 
-Template: tapir/keycloak_port
+Template: tapir/instance_name
 Type: string
-Default: 8800
-Description: Local port for Keycloak:
- Keycloak listens on 127.0.0.1 only; nginx forwards the login pages.
+Default: tapir
+Description: Name of the instance:
+ Short name, also the Keycloak realm: a-z, 0-9 and -, e.g. ackervielfalt.
+
+Template: tapir/domain
+Type: string
+Default:
+Description: Public host name of the instance:
+ E.g. tapir.example.org. The nginx site, the Keycloak realm and all URLs are
+ derived from it.
+
+Template: tapir/port
+Type: string
+Default: 8000
+Description: Local port of the instance:
+ gunicorn listens on 127.0.0.1:<port>, redis on <port> + 10000.
 
 Template: tapir/admin_email
 Type: string
 Default:
-Description: E-mail address of the first Tapir admin:
- Gets a Keycloak login; the initial password is written to
- /root/tapir-initial-admin.txt. Leave empty to skip.
+Description: E-mail address of the first admin:
+ Gets a Tapir account with a Keycloak login; the initial password is written
+ to /etc/tapir/initial-passwords/. Leave empty to skip.
 
-Template: tapir/keycloak_admin_url
+Template: tapir/image
 Type: string
-Default: http://localhost:8080
-Description: Keycloak URL used by the server:
- Internal address under which Tapir reaches the Keycloak admin API.
-
-Template: tapir/keycloak_proxy
-Type: boolean
-Default: true
-Description: Serve the Keycloak login under the public URL of Tapir?
- The generated nginx site then forwards /realms/ and /resources/ to the
- internal Keycloak address, and the public Keycloak URL is the public URL of
- Tapir. Keycloak needs KC_HOSTNAME set to that URL and KC_PROXY_HEADERS=xforwarded.
- Choose no if Keycloak has its own host name.
-
-Template: tapir/keycloak_public_url
-Type: string
-Default: http://localhost:8080
-Description: Public Keycloak URL:
- Address of Keycloak as seen by members' browsers.
-
-Template: tapir/keycloak_realm
-Type: string
-Default: tapir
-Description: Keycloak realm:
-
-Template: tapir/keycloak_client_id
-Type: string
-Default: tapir-backend
-Description: Keycloak client ID:
-
-Template: tapir/keycloak_client_secret
-Type: password
-Description: Keycloak client secret:
- Leave empty to keep the current value.
-
-Template: tapir/gunicorn_bind
-Type: string
-Default: 127.0.0.1:8000
-Description: Address the web server listens on:
- Put a reverse proxy (nginx, caddy) with TLS in front of it. If nginx is
- installed, the package writes a matching site to
- /etc/nginx/sites-available/tapir; enabling it is left to you.
-
-Template: tapir/tls_certificate
-Type: string
-Default:
-Description: TLS certificate (full chain) for the nginx site:
- Leave empty for /etc/letsencrypt/live/<host>/fullchain.pem. As long as the
- file does not exist, the site only serves HTTP (enough to request a
- certificate); run "dpkg-reconfigure tapir" afterwards to switch to HTTPS.
-
-Template: tapir/tls_certificate_key
-Type: string
-Default:
-Description: TLS private key for the nginx site:
- Leave empty for /etc/letsencrypt/live/<host>/privkey.pem.
+Default: ghcr.io/beerlesklopfer/wirgarten-tapir:latest
+Description: Container image of Tapir:

@@ -1,6 +1,0 @@
-[Unit]
-Description=Tapir (web, celery worker, celery beat)
-Wants=tapir-web.service tapir-celery.service tapir-celery-beat.service
-
-[Install]
-WantedBy=multi-user.target

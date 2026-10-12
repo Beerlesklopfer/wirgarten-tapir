@@ -8,6 +8,7 @@
 #   tapir-instance status <name>
 #   tapir-instance upgrade <name>|--all [--image <image>]                 pull, migrate, restart
 #   tapir-instance restart|stop|start <name>
+#   tapir-instance nginx <name>                                         rewrite the nginx site (e.g. HTTPS once the certificate exists)
 #   tapir-instance logs <name> [web|worker|beat|redis]
 #   tapir-instance manage <name> <manage.py arguments>                   e.g. createsuperuser, shell
 #   tapir-instance user-add <name> <mail> [--admin] [--first <name>] [--last <name>]
@@ -671,6 +672,7 @@ cmd_remove() {
 }
 
 main() {
+    [ "$(id -u)" = 0 ] || [ -n "${TAPIR_INSTANCE_TEST:-}" ] || die "tapir-instance is for root only"
     local command="${1:-}"; shift || true
     case "$command" in
         create) cmd_create "$@" ;;
@@ -680,6 +682,7 @@ main() {
         status) require_instance "${1:-}"; check_instance "$1" ;;
         upgrade) cmd_upgrade "$@" ;;
         restart|start) require_instance "${1:-}"; start_instance "$1" ;;
+        nginx) require_instance "${1:-}"; write_nginx "$1" ;;
         stop) require_instance "${1:-}"; read -ra unit_list <<< "$(units "$1")"
               $SYSTEMCTL stop "tapir-$1.target" "${unit_list[@]}" ;;
         logs) require_instance "${1:-}"; journalctl -u "tapir-$1-${2:-web}" -n 100 --no-pager 2>/dev/null \
@@ -695,7 +698,7 @@ main() {
                       *) die "unknown option $1" ;; esac; done
                   add_user "$name" "$email" "$admin" "$first" "$last" ;;
         remove) cmd_remove "$@" ;;
-        ""|-h|--help|help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
+        ""|-h|--help|help) sed -n '2,/^[^#]/{/^#/p}' "$0" | sed 's/^# \{0,1\}//' ;;
         *) die "unknown command $command (see: tapir-instance --help)" ;;
     esac
 }
