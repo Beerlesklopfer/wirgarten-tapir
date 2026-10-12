@@ -92,6 +92,14 @@ set_env() {  # file key value
 unset_env() { sed -i "/^$2=/d" "$1"; }
 psql_admin() { $PSQL_ADMIN "$@"; }
 port_in_use() { ss -ltnH "sport = :$1" | grep -q .; }
+# A container of that name that was not started by our systemd unit must never be replaced
+# (quadlet runs podman with --replace and removes the container when the unit stops).
+assert_own_container() {  # container unit
+    podman container exists "$1" 2>/dev/null || return 0
+    local unit
+    unit="$(podman inspect -f '{{index .Config.Labels "PODMAN_SYSTEMD_UNIT"}}' "$1" 2>/dev/null || true)"
+    [ "$unit" = "$2" ] || die "a container named $1 exists that tapir-instance did not create (unit: ${unit:-none}) - rename or remove it first"
+}
 check_name() {
     printf '%s' "$1" | grep -qE '^[a-z][a-z0-9-]{1,30}$' || die "invalid instance name '$1' (a-z, 0-9, -)"
 }
@@ -162,6 +170,7 @@ EOF
     cp -rL "$TAPIR_SHARE/keycloak/themes/wirgarten" "$TAPIR_LIB/keycloak/themes/"
 
     local unit="$QUADLET_DIR/tapir-keycloak.container" new
+    assert_own_container tapir-keycloak tapir-keycloak.service
     install -d "$QUADLET_DIR"
     new="$(cat <<EOF
 # Written by tapir-instance: Keycloak shared by all Tapir instances
@@ -257,6 +266,7 @@ write_units() {  # name
     env="$(instance_env "$name")"
     image="$(image_of "$name")"
     redis_port="$(env_value "$env" TAPIR_REDIS_PORT)"
+    for role in web worker beat redis; do assert_own_container "tapir-$name-$role" "tapir-$name-$role.service"; done
     install -d "$QUADLET_DIR" "$SYSTEMD_DIR"
     cat > "$SYSTEMD_DIR/tapir-$name.target" <<EOF
 # Written by tapir-instance
