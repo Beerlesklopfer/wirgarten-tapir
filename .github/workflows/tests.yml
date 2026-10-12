@@ -19,16 +19,25 @@ jobs:
   sonarcloud:
     needs: test
     runs-on: ubuntu-latest
+    # Forks without a SonarCloud project have no token: the steps are skipped instead of failing
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
+      - name: SonarCloud token missing, scan skipped
+        if: env.SONAR_TOKEN == ''
+        run: echo "No SONAR_TOKEN secret in this repository - SonarCloud scan skipped."
       - uses: actions/checkout@v6
+        if: env.SONAR_TOKEN != ''
         with:
           # Disabling shallow clone is recommended for improving relevancy of reporting
           fetch-depth: 0
       - name: Download coverage.xml
+        if: env.SONAR_TOKEN != ''
         uses: actions/download-artifact@v8
         with:
           name: coverage-reports
       - name: SonarCloud Scan
+        if: env.SONAR_TOKEN != ''
         uses: SonarSource/sonarqube-scan-action@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
