@@ -1,39 +1,129 @@
+/* Solawi Ackervielfalt: colours and fonts of www.solawi-ackervielfalt.de
+ * Fira Sans (SIL Open Font License, see ../fonts/OFL-FiraSans.txt) ships with the theme.
+ * Garden Grown (Cultivated Mind) is licensed to the Solawi and is not part of the repository:
+ * the server serves it from /theme-fonts/akv/ (see packaging/README.md, "Theme fonts").
+ * Without it the headings fall back to Fira Sans. */
+@font-face {
+  font-family: "Fira Sans";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("../fonts/fira-sans-v11-latin-300.woff2") format("woff2"),
+    url("../fonts/fira-sans-v11-latin-300.woff") format("woff");
+}
+@font-face {
+  font-family: "Garden Grown B Caps";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/theme-fonts/akv/gardengrown-bcaps-webfont.woff2") format("woff2"),
+    url("/theme-fonts/akv/gardengrown-bcaps-webfont.woff") format("woff");
+}
 :root {
-  --primary: #267c1d;
+  --primary: #28476e;
+  --primary-hover: #3f6491;
   --secondary: #bd4a55;
+  --background: #f4f1e7;
+  --surface-muted: #edefed;
   --platinum: #e9e7e5;
   --white: #ffffff;
   --black: #000000;
-  --active-color: #cfe8c9;
+  --active-color: #d6e0ec;
+  --heading-font: "Garden Grown B Caps", "Fira Sans", sans-serif;
+  --bs-primary: #28476e;
+  --bs-primary-rgb: 40, 71, 110;
+  --bs-secondary: #bd4a55;
+  --bs-secondary-rgb: 189, 74, 85;
+  --bs-link-color: #28476e;
+  --bs-link-hover-color: #3f6491;
+  --bs-body-font-family: "Fira Sans", sans-serif;
 }
 h1 {
   line-height: 1.4 !important;
+  font-family: var(--heading-font);
+  letter-spacing: 0.5px;
+  color: var(--primary);
   font-size: 39px !important;
 }
 h2 {
   line-height: 1.4 !important;
+  font-family: var(--heading-font);
+  letter-spacing: 0.5px;
+  color: var(--primary);
   font-size: 33px !important;
 }
 h3 {
   line-height: 1.4 !important;
+  font-family: var(--heading-font);
+  letter-spacing: 0.5px;
+  color: var(--primary);
   font-size: 23px !important;
 }
 h4 {
   line-height: 1.4 !important;
+  font-family: var(--heading-font);
+  letter-spacing: 0.5px;
+  color: var(--primary);
   font-size: 20px !important;
 }
 h5 {
   line-height: 1.4 !important;
+  font-family: var(--heading-font);
+  letter-spacing: 0.5px;
+  color: var(--primary);
   font-size: 17px !important;
 }
 h6 {
   line-height: 1.4 !important;
+  font-family: var(--heading-font);
+  letter-spacing: 0.5px;
+  color: var(--primary);
   font-size: 16px !important;
 }
 body {
   font-size: 16px !important;
   line-height: 1.7 !important;
+  font-family: "Fira Sans", sans-serif;
   color: var(--black);
+  background-color: var(--background);
+}
+a {
+  color: var(--primary);
+}
+a:hover {
+  color: var(--primary-hover);
+}
+.navbar.bg-dark {
+  background-color: var(--primary) !important;
+}
+.sidebar.bg-light {
+  background-color: var(--surface-muted) !important;
+}
+.card {
+  border-color: var(--platinum);
+}
+.btn-primary {
+  background-color: var(--primary);
+  border-color: var(--primary);
+}
+.btn-primary:hover,
+.btn-primary:focus {
+  background-color: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+.btn-outline-primary {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.btn-outline-primary:hover {
+  background-color: var(--primary);
+  border-color: var(--primary);
+}
+.text-primary {
+  color: var(--primary) !important;
+}
+.bg-primary {
+  background-color: var(--primary) !important;
 }
 .btn-secondary {
   background-color: var(--secondary);
@@ -176,11 +266,11 @@ main {
   padding-right: 1em;
 }
 .step.active .step-icon {
-  background: #006633;
+  background: var(--primary);
 }
 .step.active p {
-  color: #006633;
+  color: var(--primary);
 }
 .indicator-line.active {
-  background: #006633;
+  background: var(--primary);
 }
