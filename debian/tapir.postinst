@@ -3,112 +3,34 @@ set -e
 
 . /usr/share/debconf/confmodule
 
-ENV_FILE=/etc/tapir/tapir.env
-PLACEHOLDER_DB_URL='postgresql://tapir:CHANGE_ME@localhost:5432/tapir'
+if [ "$1" = configure ] && ! ls /etc/tapir/instances/*.env >/dev/null 2>&1; then
+    db_get tapir/instance_name; name="$(printf '%s' "$RET" | tr 'A-Z_' 'a-z-')"
+    db_get tapir/domain; domain="$RET"
+    db_get tapir/port; port="$RET"
+    db_get tapir/admin_email; admin_email="$RET"
+    db_get tapir/image; image="$RET"
+    db_get tapir/adopt; adopt="$RET"
+    db_get tapir/create_instance; create="$RET"
+    db_stop
 
-random_string() {
-    tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1"
-}
-
-# Sets KEY=value in the configuration file, replacing an existing (or commented) line
-set_env() {
-    escaped="$(printf '%s' "$2" | sed 's/[&|\\]/\\&/g')"
-    if grep -q "^#\?$1=" "$ENV_FILE"; then
-        sed -i "0,/^#\?$1=.*/s||$1=$escaped|" "$ENV_FILE"
+    # stdout belongs to debconf: everything goes to stderr
+    if [ -r /etc/tapir/tapir.env ]; then
+        if [ "$adopt" = true ] && [ -n "$domain" ]; then
+            TAPIR_IMAGE="$image" tapir-instance adopt "$name" --domain "$domain" \
+                ${admin_email:+--admin-email "$admin_email"} >&2 \
+                || echo "tapir: WARNING: adopting failed - fix the cause and run: tapir-instance adopt $name --domain $domain" >&2
+        else
+            echo "tapir: the earlier installation is not running - move it with: tapir-instance adopt <name> --domain <host>" >&2
+        fi
+    elif [ "$create" = true ] && [ -n "$domain" ]; then
+        tapir-instance create "$name" --domain "$domain" --port "$port" --image "$image" \
+            ${admin_email:+--admin-email "$admin_email"} >&2 \
+            || echo "tapir: WARNING: creating the instance failed - fix the cause and run: tapir-instance create $name --domain $domain --port $port" >&2
     else
-        printf '%s=%s\n' "$1" "$2" >> "$ENV_FILE"
-    fi
-}
-
-# Copies a debconf answer into the configuration file
-apply() {
-    db_get "tapir/$1"
-    if [ -n "$RET" ]; then
-        set_env "$2" "$RET"
-    fi
-}
-
-# Creates the "tapir" role and database in a local PostgreSQL cluster with a
-# random password. Never touches an existing role.
-setup_local_database() {
-    grep -qx "DATABASE_CONNECTION=$PLACEHOLDER_DB_URL" "$ENV_FILE" || return 0
-    if ! command -v psql >/dev/null || ! runuser -u postgres -- psql -X -tAc 'SELECT 1' >/dev/null 2>&1; then
-        echo "tapir: no local PostgreSQL found - set DATABASE_CONNECTION in $ENV_FILE." >&2
-        return 0
-    fi
-    psql_admin() { runuser -u postgres -- psql -X -q -tA "$@"; }
-
-    if [ "$(psql_admin -c "SELECT 1 FROM pg_roles WHERE rolname = 'tapir'")" = 1 ]; then
-        echo "tapir: PostgreSQL role 'tapir' already exists - set its password in $ENV_FILE." >&2
-        return 0
-    fi
-    password="$(random_string 32)"
-    psql_admin -c "CREATE ROLE tapir LOGIN PASSWORD '$password'"
-    if [ "$(psql_admin -c "SELECT 1 FROM pg_database WHERE datname = 'tapir'")" != 1 ]; then
-        runuser -u postgres -- createdb --owner=tapir tapir
-    fi
-    set_env DATABASE_CONNECTION "postgresql://tapir:$password@localhost:5432/tapir"
-    echo "tapir: created PostgreSQL role and database 'tapir'."  >&2
-}
-
-if [ "$1" = configure ] || [ "$1" = reconfigure ]; then
-    if ! getent passwd tapir >/dev/null; then
-        adduser --system --group --home /var/lib/tapir --no-create-home tapir >&2
-    fi
-
-    for dir in /var/lib/tapir /var/lib/tapir/media /var/lib/tapir/filepond_temp_uploads \
-               /var/lib/tapir/filepond_stored_uploads /var/lib/tapir/emails_from_celery /var/log/tapir; do
-        install -d -o tapir -g tapir -m 0750 "$dir"
-    done
-
-    # Not a conffile: generated once with a random secret, then kept in sync with debconf
-    if [ ! -e "$ENV_FILE" ]; then
-        install -d -m 0755 /etc/tapir
-        sed "s/@SECRET_KEY@/$(random_string 64)/" /usr/share/tapir/tapir.env.example > "$ENV_FILE"
-        chown root:tapir "$ENV_FILE"
-        chmod 0640 "$ENV_FILE"
-    fi
-
-    apply site_url SITE_URL
-    db_get tapir/site_url
-    host="$(printf '%s' "$RET" | sed -E 's|^[a-z]+://||; s|[:/].*$||')"
-    case "$host" in
-        "") ;;
-        localhost|127.0.0.1) set_env ALLOWED_HOSTS "localhost,127.0.0.1" ;;
-        *) set_env ALLOWED_HOSTS "$host" ;;
-    esac
-    apply redis_url CELERY_BROKER_URL
-    apply redis_url CELERY_RESULT_BACKEND
-    apply keycloak_admin_url KEYCLOAK_ADMIN_SERVER_URL
-    apply keycloak_public_url KEYCLOAK_PUBLIC_URL
-    apply keycloak_realm KEYCLOAK_REALM_NAME
-    apply keycloak_client_id KEYCLOAK_CLIENT_ID
-    apply keycloak_client_secret KEYCLOAK_ADMIN_CLIENT_SECRET_KEY
-    apply gunicorn_bind GUNICORN_BIND
-    # Do not keep the secret in the debconf database
-    db_set tapir/keycloak_client_secret ""
-
-    db_get tapir/database_auto
-    if [ "$RET" = true ]; then
-        setup_local_database
-    else
-        apply database_url DATABASE_CONNECTION
-    fi
-
-    if grep -qx "DATABASE_CONNECTION=$PLACEHOLDER_DB_URL" "$ENV_FILE"; then
-        echo "tapir: database not configured yet - edit $ENV_FILE or run 'dpkg-reconfigure tapir'." >&2
-    elif [ -z "$2" ] || grep -qx 'TAPIR_MIGRATE_ON_UPGRADE=true' "$ENV_FILE"; then
-        { tapir-manage migrate --noinput && tapir-manage parameter_definitions; } >&2 \
-            || echo "tapir: WARNING: migrate failed, run 'tapir-manage migrate' and 'tapir-manage parameter_definitions' manually." >&2
+        echo "tapir: no instance yet - create one with: tapir-instance create <name> --domain <host> --port <port>" >&2
     fi
 fi
-
-db_stop
 
 #DEBHELPER#
-
-if [ "$1" = configure ] && [ -n "$2" ] && [ -d /run/systemd/system ]; then
-    deb-systemd-invoke try-restart tapir.target >/dev/null || true
-fi
 
 exit 0
