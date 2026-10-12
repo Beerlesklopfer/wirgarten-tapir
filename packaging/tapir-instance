@@ -778,7 +778,7 @@ cmd_param() {  # name [--all | key [value]]
     require_instance "$name"
     if [ "$key" = --all ]; then mode=all; key=""
     elif [ -z "$key" ]; then mode=locked
-    elif [ $# -ge 3 ]; then mode=set
+    elif [ $# -ge 3 ]; then mode="set"
     else mode=show; fi
     tapir_shell "$name" "
 import base64
