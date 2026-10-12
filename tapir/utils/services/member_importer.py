@@ -32,6 +32,9 @@ from tapir.wirgarten.parameter_keys import ParameterKeys
 
 
 class MemberImporter:
+    # Off during dry runs: the database changes are rolled back, a changed Keycloak e-mail would not be
+    keycloak_updates_enabled = True
+
     @classmethod
     def import_member(cls, row: dict[str, str], update_existing: bool):
         if DataImportUtils.is_row_empty(row):
@@ -191,7 +194,11 @@ class MemberImporter:
             member_updated = True
             member.username = member.email
 
-        if email_before != member.email and member.keycloak_id:
+        if (
+            email_before != member.email
+            and member.keycloak_id
+            and cls.keycloak_updates_enabled
+        ):
             Member.objects.filter(id=member.id).update(email=member.email)
             KeycloakUserManager.get_keycloak_client(cache={}).update_user(
                 user_id=member.keycloak_id, payload={"email": member.email}
