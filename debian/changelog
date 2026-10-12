@@ -1,3 +1,12 @@
+tapir (0.2.0) trixie; urgency=medium
+
+  * Run Tapir as podman containers under systemd, one instance per solidarity
+    farm, with a shared Keycloak (realm per instance).
+  * The package only ships tapir-instance, tapir-kcadm and tapir-manage;
+    installations of the native 0.1 package are adopted.
+
+ -- Jörg Bernau <Joerg.Bernau@onesimus.io>  Mon, 12 Oct 2026 15:05:01 +0200
+
 tapir (0.1.0) trixie; urgency=medium
 
   * Initial Debian packaging with bundled virtualenv.
