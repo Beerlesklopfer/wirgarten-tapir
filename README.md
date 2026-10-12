@@ -86,6 +86,26 @@ sudo tapir-manage migrate && sudo tapir-manage parameter_definitions
 sudo systemctl enable --now tapir.target
 ```
 
+**nginx.** Everything is derived from the public URL. If nginx is installed and the public URL is not `localhost`, the package
+writes the site `/etc/nginx/sites-available/tapir`: HTTP→HTTPS redirect, proxy to gunicorn (`GUNICORN_BIND`) and,
+unless you answer no to "Serve the Keycloak login under the public URL", the Keycloak login paths `/realms/` and
+`/resources/` to the internal Keycloak address. `KEYCLOAK_PUBLIC_URL` and `ALLOWED_HOSTS` follow the public URL.
+The package never enables the site or reloads nginx; that stays a manual step:
+
+```sh
+sudo ln -s /etc/nginx/sites-available/tapir /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+# As long as there is no certificate, the site serves HTTP only, enough to request one:
+sudo certbot certonly --webroot -w /var/www/html -d tapir.example.org
+sudo dpkg-reconfigure tapir          # rewrites the site with HTTPS
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+The certificate defaults to `/etc/letsencrypt/live/<host>/`; other paths can be set with
+`sudo dpkg-reconfigure -p medium tapir`. Delete the first line of the site (`# Managed by the tapir package`) to keep
+local changes; the package then leaves the file alone. Keycloak itself needs `KC_HOSTNAME=<public URL>`,
+`KC_PROXY_HEADERS=xforwarded` and the redirect URI `<public URL>/*` for the `tapir-backend` client.
+
 Updates come with `sudo apt update && sudo apt upgrade`; the package migrates the database and restarts
 `tapir.target`. A locally built package (`packaging/build-deb.sh`) is installed with `sudo apt install ./build-deb/tapir_*.deb`.
 Details on paths, building and the CI setup: [packaging/README.md](packaging/README.md).

@@ -15,6 +15,7 @@ override_dh_auto_install:
 	cp -a $(TAPIR_PREFIX) debian/tapir/opt/
 	install -D -m 0755 packaging/tapir-manage debian/tapir/usr/bin/tapir-manage
 	install -D -m 0644 packaging/tapir.env.example debian/tapir/usr/share/tapir/tapir.env.example
+	install -D -m 0644 packaging/nginx-site.conf.in debian/tapir/usr/share/tapir/nginx-site.conf.in
 
 override_dh_auto_test override_dh_auto_clean:
 

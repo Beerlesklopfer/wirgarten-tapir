@@ -30,6 +30,15 @@ Default: http://localhost:8080
 Description: Keycloak URL used by the server:
  Internal address under which Tapir reaches the Keycloak admin API.
 
+Template: tapir/keycloak_proxy
+Type: boolean
+Default: true
+Description: Serve the Keycloak login under the public URL of Tapir?
+ The generated nginx site then forwards /realms/ and /resources/ to the
+ internal Keycloak address, and the public Keycloak URL is the public URL of
+ Tapir. Keycloak needs KC_HOSTNAME set to that URL and KC_PROXY_HEADERS=xforwarded.
+ Choose no if Keycloak has its own host name.
+
 Template: tapir/keycloak_public_url
 Type: string
 Default: http://localhost:8080
@@ -55,4 +64,20 @@ Template: tapir/gunicorn_bind
 Type: string
 Default: 127.0.0.1:8000
 Description: Address the web server listens on:
- Put a reverse proxy (nginx, caddy) with TLS in front of it.
+ Put a reverse proxy (nginx, caddy) with TLS in front of it. If nginx is
+ installed, the package writes a matching site to
+ /etc/nginx/sites-available/tapir; enabling it is left to you.
+
+Template: tapir/tls_certificate
+Type: string
+Default:
+Description: TLS certificate (full chain) for the nginx site:
+ Leave empty for /etc/letsencrypt/live/<host>/fullchain.pem. As long as the
+ file does not exist, the site only serves HTTP (enough to request a
+ certificate); run "dpkg-reconfigure tapir" afterwards to switch to HTTPS.
+
+Template: tapir/tls_certificate_key
+Type: string
+Default:
+Description: TLS private key for the nginx site:
+ Leave empty for /etc/letsencrypt/live/<host>/privkey.pem.

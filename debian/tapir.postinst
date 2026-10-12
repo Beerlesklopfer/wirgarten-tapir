@@ -51,6 +51,52 @@ setup_local_database() {
     echo "tapir: created PostgreSQL role and database 'tapir'."  >&2
 }
 
+NGINX_SITE=/etc/nginx/sites-available/tapir
+NGINX_MARKER='# Managed by the tapir package'
+
+# Writes the nginx site for the public URL to sites-available. Never enables it
+# and never reloads nginx: that is left to the administrator.
+write_nginx_site() {
+    [ -d /etc/nginx/sites-available ] || return 0
+    if [ -e "$NGINX_SITE" ] && ! head -n 1 "$NGINX_SITE" | grep -q "^$NGINX_MARKER"; then
+        echo "tapir: $NGINX_SITE was changed locally - not overwritten." >&2
+        return 0
+    fi
+    db_get tapir/site_url
+    origin="$(printf '%s' "$RET" | sed -E 's|^([a-z]+://[^/]+).*|\1|')"
+    site_host="$(printf '%s' "$origin" | sed -E 's|^[a-z]+://||; s|:.*$||')"
+    case "$site_host" in ""|localhost|127.0.0.1) return 0 ;; esac
+    upstream="$(sed -n 's/^GUNICORN_BIND=//p' "$ENV_FILE" | tail -n 1)"
+    keycloak="$(sed -n 's/^KEYCLOAK_ADMIN_SERVER_URL=//p' "$ENV_FILE" | tail -n 1)"
+    keycloak="${keycloak%/}"
+    db_get tapir/tls_certificate
+    cert="${RET:-/etc/letsencrypt/live/$site_host/fullchain.pem}"
+    db_get tapir/tls_certificate_key
+    key="${RET:-/etc/letsencrypt/live/$site_host/privkey.pem}"
+    proxy="$keycloak_proxy"
+
+    # Without certificate (yet) the site serves HTTP only, enough for certbot --webroot
+    if [ -r "$cert" ] && [ -r "$key" ]; then https=true; else https=false; fi
+    sed -e "s|@HOST@|$site_host|g; s|@UPSTREAM@|${upstream:-127.0.0.1:8000}|g" \
+        -e "s|@KEYCLOAK@|${keycloak:-http://127.0.0.1:8080}|g; s|@CERT@|$cert|g; s|@KEY@|$key|g" \
+        /usr/share/tapir/nginx-site.conf.in \
+        | if [ "$proxy" = true ]; then sed 's/#KC#//'; else sed 's/#KC#.*$//' | cat -s; fi \
+        | if [ "$https" = true ]; then sed 's/^#HTTPS#//'; else sed '/^#HTTPS#/d'; fi \
+        > "$NGINX_SITE.dpkg-tmp"
+    mv "$NGINX_SITE.dpkg-tmp" "$NGINX_SITE"
+
+    if [ "$https" = true ]; then
+        echo "tapir: wrote $NGINX_SITE (HTTPS for $site_host)." >&2
+    else
+        echo "tapir: wrote $NGINX_SITE (HTTP only, no certificate at $cert yet)." >&2
+    fi
+    if [ ! -e /etc/nginx/sites-enabled/tapir ]; then
+        echo "tapir: enable it with: ln -s $NGINX_SITE /etc/nginx/sites-enabled/ && nginx -t && systemctl reload nginx" >&2
+    elif [ "$https" = true ]; then
+        echo "tapir: apply it with: nginx -t && systemctl reload nginx" >&2
+    fi
+}
+
 if [ "$1" = configure ] || [ "$1" = reconfigure ]; then
     if ! getent passwd tapir >/dev/null; then
         adduser --system --group --home /var/lib/tapir --no-create-home tapir >&2
@@ -80,13 +126,24 @@ if [ "$1" = configure ] || [ "$1" = reconfigure ]; then
     apply redis_url CELERY_BROKER_URL
     apply redis_url CELERY_RESULT_BACKEND
     apply keycloak_admin_url KEYCLOAK_ADMIN_SERVER_URL
-    apply keycloak_public_url KEYCLOAK_PUBLIC_URL
+    db_get tapir/keycloak_proxy
+    keycloak_proxy="$RET"
+    case "$host" in localhost|127.0.0.1) keycloak_proxy=false ;; esac
+    if [ "$keycloak_proxy" = true ]; then
+        # Keycloak is served by the nginx site under the public URL of Tapir
+        db_get tapir/site_url
+        set_env KEYCLOAK_PUBLIC_URL "$(printf '%s' "$RET" | sed -E 's|^([a-z]+://[^/]+).*|\1|')"
+    else
+        apply keycloak_public_url KEYCLOAK_PUBLIC_URL
+    fi
     apply keycloak_realm KEYCLOAK_REALM_NAME
     apply keycloak_client_id KEYCLOAK_CLIENT_ID
     apply keycloak_client_secret KEYCLOAK_ADMIN_CLIENT_SECRET_KEY
     apply gunicorn_bind GUNICORN_BIND
     # Do not keep the secret in the debconf database
     db_set tapir/keycloak_client_secret ""
+
+    write_nginx_site
 
     db_get tapir/database_auto
     if [ "$RET" = true ]; then
