@@ -4,7 +4,7 @@ set -e
 . /usr/share/debconf/confmodule
 
 if [ "$1" = configure ] && ! ls /etc/tapir/instances/*.env >/dev/null 2>&1; then
-    db_get tapir/instance_name; name="$RET"
+    db_get tapir/instance_name; name="$(printf '%s' "$RET" | tr 'A-Z_' 'a-z-')"
     db_get tapir/domain; domain="$RET"
     db_get tapir/port; port="$RET"
     db_get tapir/admin_email; admin_email="$RET"

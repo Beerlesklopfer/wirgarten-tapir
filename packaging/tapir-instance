@@ -474,7 +474,7 @@ KeycloakUserManager.get_keycloak_client({}).get_users({'max': 1})"
 
 # --- commands -----------------------------------------------------------------------------------
 cmd_create() {
-    local name="${1:-}"; shift || true
+    local name; name="$(printf '%s' "${1:-}" | tr 'A-Z' 'a-z')"; shift || true
     check_name "$name"
     local domain="" port="" admin_email="" realm="$name" image="$TAPIR_IMAGE_DEFAULT" db_url="" kc_port=8800 nginx=true
     while [ $# -gt 0 ]; do
@@ -555,7 +555,7 @@ cmd_create() {
 }
 
 cmd_adopt() {
-    local name="${1:-tapir}"; shift || true
+    local name; name="$(printf '%s' "${1:-tapir}" | tr 'A-Z' 'a-z')"; shift || true
     check_name "$name"
     local domain="" admin_email="" old_env="$TAPIR_ETC/tapir.env" env
     while [ $# -gt 0 ]; do
