@@ -729,7 +729,9 @@ main() {
                     exec podman exec -it "tapir-$name-web" python manage.py "$@"
                 else run_once "$name" manage "$@"; fi ;;
         user-add) require_instance "${1:-}"; local name="$1" email="${2:-}" admin=false first="" last=""
-                  shift 2 || die "usage: tapir-instance user-add <name> <mail> [--admin]"
+                  shift 2 || die "usage: tapir-instance user-add <instance> <mail> [--admin] [--first <first name>] [--last <last name>]"
+                  printf '%s' "$email" | grep -qE '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$' \
+                      || die "'$email' is not an e-mail address - usage: tapir-instance user-add <instance> <mail> [--admin] [--first <first name>] [--last <last name>]"
                   while [ $# -gt 0 ]; do case "$1" in
                       --admin) admin=true; shift ;; --first) first="$2"; shift 2 ;; --last) last="$2"; shift 2 ;;
                       *) die "unknown option $1" ;; esac; done
