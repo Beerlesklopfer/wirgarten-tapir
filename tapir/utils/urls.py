@@ -1,28 +1,31 @@
 from django.conf import settings
 from django.urls import path
 
-from tapir.utils import views
+from tapir.utils import views_data_import
 
 app_name = "utils"
 urlpatterns = [
-    path("data_import", views.DataImportView.as_view(), name="data_import"),
+    path("data_import", views_data_import.DataImportView.as_view(), name="data_import"),
     path(
         "data_import/apply",
-        views.DataImportApplyView.as_view(),
+        views_data_import.DataImportApplyView.as_view(),
         name="data_import_apply",
     ),
     path(
         "data_import/activation",
-        views.DataImportActivationView.as_view(),
+        views_data_import.DataImportActivationView.as_view(),
         name="data_import_activation",
     ),
     path(
         "data_import/template/<str:import_type>",
-        views.DataImportTemplateView.as_view(),
+        views_data_import.DataImportTemplateView.as_view(),
         name="data_import_template",
     ),
 ]
+# The test data views need factory_boy, which only debug instances have installed
 if settings.DEBUG:
+    from tapir.utils import views
+
     urlpatterns += [
         path(
             "reset_test_data",
