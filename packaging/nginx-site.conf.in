@@ -41,6 +41,9 @@ server {
 #KC#    }
 #KC#    location /resources/ { proxy_pass @KEYCLOAK@; }
 
+    # Licensed theme fonts that are not published with Tapir (tapir-instance theme)
+    location /theme-fonts/ { alias @LIB@/theme-fonts/; expires 30d; }
+
     location / {
         proxy_pass http://@UPSTREAM@;
         proxy_read_timeout 120s;

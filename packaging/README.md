@@ -78,6 +78,25 @@ A Keycloak login alone does not open Tapir; staff accounts are created with
 internal: `ssh -L 8800:127.0.0.1:8800 root@<server>`, http://localhost:8800/admin, user `admin`, password in
 `/etc/tapir/keycloak.env`.
 
+## Parameters locked in the web UI
+
+Outside debug instances Tapir locks some base settings in the web UI: share price, automatic renewal, notice
+period and its unit, trial period, legal status, picking mode. `tapir-instance param <name>` lists them,
+`tapir-instance param <name> <key>` shows one with its options, `tapir-instance param <name> <key> <value>` sets
+it (checked against datatype, options and validators), `--all` lists every parameter.
+
+## Theme
+
+`tapir-instance theme <name> <theme>` (e.g. `akv`) sets the Tapir parameter `organisation.theme`, remembers the
+theme as `TAPIR_THEME` in the instance env and gives the realm the Keycloak theme of the same name for login
+pages and mails (falls back to `wirgarten` if there is none). The realm also gets German as its language and the
+`EMAIL_HOST_SENDER_NAME` of the instance as display name, so mails end with "Liebe Grüße, <Solawi>".
+
+Theme fonts: fonts a Solawi has a licence for but that must not be published with Tapir (e.g. Garden Grown of
+the `akv` theme) go to `/var/lib/tapir/theme-fonts/<theme>/`. nginx serves them under `/theme-fonts/` to Tapir
+and Keycloak alike (in the site written by `tapir-instance` and in the snippet `tapir-keycloak.conf`). Without
+them the themes fall back to their free fonts.
+
 ## Upgrades
 
 `apt upgrade` updates the tools only. Instances are upgraded explicitly:

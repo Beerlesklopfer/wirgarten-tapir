@@ -12,6 +12,8 @@
 #   tapir-instance logs <name> [web|worker|beat]
 #   tapir-instance manage <name> <manage.py arguments>                   e.g. createsuperuser, shell
 #   tapir-instance user-add <name> <mail> [--admin] [--first <name>] [--last <name>]
+#   tapir-instance theme <name> <theme>                                 theme of Tapir and of the Keycloak login pages and mails
+#   tapir-instance param <name> [--all | <key> [<value>]]             show/set Tapir parameters, also those locked in the web UI
 #   tapir-instance remove <name> [--purge]                              --purge also drops database and data
 #
 # Every instance gets: /etc/tapir/instances/<name>.env, data in /var/lib/tapir/<name>, the systemd units
@@ -170,8 +172,15 @@ EOF
         || psql_admin -c "CREATE DATABASE keycloak OWNER keycloak"
 
     install -d -m 0755 "$TAPIR_LIB/keycloak/themes"
-    rm -rf "$TAPIR_LIB/keycloak/themes/wirgarten"
-    cp -rL "$TAPIR_SHARE/keycloak/themes/wirgarten" "$TAPIR_LIB/keycloak/themes/"
+    local theme
+    for theme in "$TAPIR_SHARE"/keycloak/themes/*/; do
+        theme="$(basename "$theme")"
+        rm -rf "${TAPIR_LIB:?}/keycloak/themes/$theme"
+        cp -rL "$TAPIR_SHARE/keycloak/themes/$theme" "$TAPIR_LIB/keycloak/themes/"
+    done
+    # Fonts a Solawi has a licence for but that must not be published with Tapir; nginx serves
+    # them under /theme-fonts/<theme>/ to Tapir and Keycloak alike
+    install -d -m 0755 "$TAPIR_LIB/theme-fonts"
 
     local unit="$QUADLET_DIR/tapir-keycloak.container" new
     assert_own_container tapir-keycloak tapir-keycloak.service
@@ -188,7 +197,7 @@ ContainerName=tapir-keycloak
 Image=$KEYCLOAK_IMAGE
 Network=host
 EnvironmentFile=$KC_ENV
-Volume=$TAPIR_LIB/keycloak/themes/wirgarten:/opt/keycloak/themes/wirgarten:ro
+Volume=$TAPIR_LIB/keycloak/themes:/opt/keycloak/themes:ro
 Exec=start
 
 [Service]
@@ -218,6 +227,20 @@ EOF
     kc_login
 }
 
+# Login pages and mails of the realm in the theme of the instance (TAPIR_THEME), in German, and
+# with the sender name of the instance as realm name (e.g. "Liebe Grüße, Solawi Ackervielfalt")
+apply_realm_theme() {  # name realm
+    local env theme display
+    env="$(instance_env "$1")"
+    theme="$(env_value "$env" TAPIR_THEME)"
+    [ -n "$theme" ] && [ -d "$TAPIR_LIB/keycloak/themes/$theme" ] || theme=wirgarten
+    display="$(env_value "$env" EMAIL_HOST_SENDER_NAME)"
+    # German pages and mails: without internationalization Keycloak falls back to English
+    kcadm update "realms/$2" -s "loginTheme=$theme" -s "emailTheme=$theme" \
+        -s internationalizationEnabled=true -s 'supportedLocales=["de"]' -s defaultLocale=de \
+        ${display:+-s "displayName=$display"}
+}
+
 ensure_realm() {  # name realm domain
     local name="$1" realm="$2" domain="$3" env secret public_url id
     env="$(instance_env "$name")"
@@ -230,8 +253,9 @@ ensure_realm() {  # name realm domain
             "$TAPIR_SHARE/keycloak/tapir-realm.json.in" | kcadm create realms -f - >/dev/null 2>&1 \
             || die "creating realm $realm failed"
     fi
-    # Also for an existing realm: frontend URL, redirect URIs, secret
+    # Also for an existing realm: frontend URL, theme, redirect URIs, secret
     kcadm update "realms/$realm" -s "attributes.frontendUrl=$public_url"
+    apply_realm_theme "$name" "$realm"
     for client in tapir-backend tapir-frontend; do
         id="$(kcadm get clients -r "$realm" -q clientId=$client --fields id --format csv --noquotes)"
         kcadm update "clients/$id" -r "$realm" -s "rootUrl=$public_url" \
@@ -420,6 +444,10 @@ location /resources/ {
     proxy_set_header Host \$host;
     proxy_set_header X-Forwarded-Proto \$scheme;
 }
+location /theme-fonts/ {
+    alias $TAPIR_LIB/theme-fonts/;
+    expires 30d;
+}
 EOF
 
     # sites-available/tapir-<name>, HTTPS as soon as the certificate exists; enabling it is manual
@@ -429,7 +457,7 @@ EOF
     if [ -e "$site" ] && ! head -n 1 "$site" | grep -q '^# Managed by the tapir package'; then
         warn "$site was changed locally - not overwritten"
     else
-        sed -e "s|@HOST@|$domain|g; s|@UPSTREAM@|$upstream|g; s|@KEYCLOAK@|$keycloak|g; s|@CERT@|$cert|g; s|@KEY@|$key|g" \
+        sed -e "s|@HOST@|$domain|g; s|@UPSTREAM@|$upstream|g; s|@KEYCLOAK@|$keycloak|g; s|@CERT@|$cert|g; s|@KEY@|$key|g; s|@LIB@|$TAPIR_LIB|g" \
             "$TAPIR_SHARE/nginx-site.conf.in" | sed 's/#KC#//' \
             | if [ -r "$cert" ] && [ -r "$key" ]; then sed 's/^#HTTPS#//'; else sed '/^#HTTPS#/d'; fi > "$site"
     fi
@@ -713,6 +741,93 @@ cmd_keycloak() {  # move an instance to (or refresh it in) the shared Keycloak
     check_instance "$name"
 }
 
+cmd_theme() {  # name theme
+    local name="${1:-}" theme="${2:-}" env realm
+    require_instance "$name"
+    printf '%s' "$theme" | grep -qE '^[a-z0-9_]+$' || die "usage: tapir-instance theme <instance> <theme>, e.g. akv"
+    env="$(instance_env "$name")"
+    tapir_shell "$name" "
+from tapir.configuration.models import TapirParameter
+from tapir.core.config import THEME_OPTIONS
+if '$theme' not in dict(THEME_OPTIONS):
+    raise SystemExit('unknown theme $theme, known: ' + ', '.join(sorted(dict(THEME_OPTIONS))))
+TapirParameter.objects.filter(key='organisation.theme').update(value='$theme')
+" || die "Tapir does not know the theme $theme"
+    set_env "$env" TAPIR_THEME "$theme"
+    log "Tapir uses the theme $theme"
+    realm="$(env_value "$env" KEYCLOAK_REALM_NAME)"
+    if [ -n "$realm" ] && podman container exists tapir-keycloak 2>/dev/null; then
+        kc_login
+        apply_realm_theme "$name" "$realm"
+        if [ -d "$TAPIR_LIB/keycloak/themes/$theme" ]; then
+            log "Keycloak realm $realm uses the theme $theme"
+        else
+            warn "no Keycloak theme $theme - the login pages of realm $realm stay in the default theme"
+        fi
+    fi
+    if ! ls "$TAPIR_LIB/theme-fonts/$theme/"* >/dev/null 2>&1; then
+        log "Licensed fonts of the theme (if any) go to $TAPIR_LIB/theme-fonts/$theme/"
+    fi
+}
+
+# Tapir locks some base settings in the web UI outside debug instances (share price, automatic
+# renewal, notice period, trial period, legal status, picking mode); they are set here, checked
+# against datatype, options and validators of the parameter definition
+cmd_param() {  # name [--all | key [value]]
+    local name="${1:-}" key="${2:-}" value="${3-}" mode
+    require_instance "$name"
+    if [ "$key" = --all ]; then mode=all; key=""
+    elif [ -z "$key" ]; then mode=locked
+    elif [ $# -ge 3 ]; then mode="set"
+    else mode=show; fi
+    tapir_shell "$name" "
+import base64
+from tapir.configuration.models import TapirParameter, TapirParameterDatatype
+from tapir.configuration.parameter import get_parameter_meta
+mode = '$mode'
+key = base64.b64decode('$(printf '%s' "$key" | base64 -w0)').decode()
+value = base64.b64decode('$(printf '%s' "$value" | base64 -w0)').decode()
+if mode in ('locked', 'all'):
+    params = TapirParameter.objects.order_by('category', '-order_priority')
+    if mode == 'locked':
+        params = params.filter(enabled=False)
+        print('Locked in the web UI (all: tapir-instance param $name --all):')
+    for p in params:
+        print(f'  {p.key:55} {p.value!s:20} {p.label}')
+    raise SystemExit
+param = TapirParameter.objects.filter(key=key).first()
+if param is None:
+    raise SystemExit(f'unknown parameter {key} - list: tapir-instance param $name --all')
+meta = get_parameter_meta(key)
+options = (meta.options or (meta.options_callable() if meta.options_callable else None)) if meta else None
+if mode == 'show':
+    locked = '' if param.enabled else ', locked in the web UI'
+    print(f'{param.key}: {param.value}  ({param.label}, {param.datatype}{locked})')
+    if param.description:
+        print(f'  {param.description}')
+    if options:
+        print('  options: ' + ', '.join(f'{k} ({v})' for k, v in options))
+    raise SystemExit
+if param.datatype == TapirParameterDatatype.BOOLEAN.value:
+    try:
+        value = str(TapirParameter.str2bool(value))
+    except (ValueError, AttributeError):
+        raise SystemExit(f'{key} expects true or false')
+if options and value not in [str(k) for k, _ in options]:
+    raise SystemExit(f'{key} expects one of: ' + ', '.join(str(k) for k, _ in options))
+old = param.value
+param.value = value
+try:
+    typed = param.get_value()
+    for validator in (meta.validators if meta else []):
+        validator(typed)
+except Exception as error:
+    raise SystemExit(f'invalid value for {key}: {error}')
+param.save()
+print(f'{key}: {old} -> {param.value}')
+"
+}
+
 cmd_list() {
     printf '%-16s %-34s %-7s %-16s %s\n' INSTANCE DOMAIN PORT REALM STATE
     for env in "$INSTANCES"/*.env; do
@@ -804,6 +919,8 @@ main() {
                       --admin) admin=true; shift ;; --first) first="$2"; shift 2 ;; --last) last="$2"; shift 2 ;;
                       *) die "unknown option $1" ;; esac; done
                   add_user "$name" "$email" "$admin" "$first" "$last" ;;
+        theme) cmd_theme "$@" ;;
+        param) cmd_param "$@" ;;
         remove) cmd_remove "$@" ;;
         ""|-h|--help|help) sed -n '2,/^[^#]/{/^#/p}' "$0" | sed 's/^# \{0,1\}//' ;;
         *) die "unknown command $command (see: tapir-instance --help)" ;;
