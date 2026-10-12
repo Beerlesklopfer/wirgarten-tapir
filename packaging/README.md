@@ -14,7 +14,8 @@ Debian 13 trixie) only brings the tools and templates.
 | `/etc/tapir/initial-passwords/` | initial passwords of created users (root only) |
 | `/var/lib/tapir/<name>` | data of an instance (`/data` in the containers: media, uploads, logs, beat schedule) |
 | `/var/lib/tapir/keycloak` | Keycloak login theme |
-| `/etc/containers/systemd/tapir-*.container` | quadlet units: `tapir-keycloak`, `tapir-<name>-{web,worker,beat,redis}` |
+| `/etc/containers/systemd/tapir-*.container` | quadlet units: `tapir-keycloak`, `tapir-redis`, `tapir-<name>-{web,worker,beat}` |
+| `/var/lib/tapir/redis` | data of the shared redis (append-only file) |
 | `/etc/systemd/system/tapir-<name>.target` | starts/stops all units of an instance |
 | `/etc/nginx/sites-available/tapir-<name>` | nginx site of an instance, enabling it is manual |
 
@@ -23,7 +24,7 @@ flowchart LR
     N[nginx on the host] -->|"/"| W1["tapir-a-web<br>127.0.0.1:8001"]
     N -->|"/realms/, /resources/"| K["tapir-keycloak<br>127.0.0.1:8800<br>realm per instance"]
     W1 --- C1["tapir-a-worker, -beat"]
-    C1 --- R1["tapir-a-redis :18001"]
+    C1 --- R1["tapir-redis 127.0.0.1:6380<br>database per instance"]
     W1 --> P[("PostgreSQL on the host<br>tapir_a, keycloak")]
     K --> P
 ```
@@ -40,7 +41,8 @@ sudo tapir-instance create ackervielfalt --domain ackervielfalt.example.org --po
 
 `create` is idempotent and ends with checks (units running, Tapir answers, Keycloak issuer, Tapir reaches the
 Keycloak admin API, nginx if enabled). Every instance gets its own PostgreSQL role and database `tapir_<name>`,
-a redis container on port + 10000 and the realm `<name>` with a generated client secret; the mail server of the
+its own database number in the shared redis container `tapir-redis` (127.0.0.1:6380; `upgrade` also moves older
+setups with a redis on the host or per instance over to it) and the realm `<name>` with a generated client secret; the mail server of the
 instance (`EMAIL_HOST*` in its env file) is also used by Keycloak.
 
 ## nginx and certificates

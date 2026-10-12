@@ -60,9 +60,10 @@ is `./scripts/reset_and_start_local_server.sh`
 ## Running in production (containers, APT)
 
 In production every Tapir instance - one per solidarity farm - runs as podman containers under systemd: web
-(gunicorn), celery worker, celery beat and redis from the production image
+(gunicorn), celery worker and celery beat from the production image
 (`ghcr.io/beerlesklopfer/wirgarten-tapir`, built from `docker/production/Containerfile`). One Keycloak container
-serves all instances, each with its own realm. PostgreSQL and nginx run on the host. The Debian package `tapir`
+serves all instances, each with its own realm, and one redis container holds the celery queues and caches of all
+instances, each in its own database number. PostgreSQL and nginx run on the host. The Debian package `tapir`
 (Debian 13 trixie, `Architecture: all`) installs the tools; a signed APT repository is published on GitHub Pages:
 https://beerlesklopfer.github.io/wirgarten-tapir
 

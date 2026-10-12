@@ -9,14 +9,15 @@
 #   tapir-instance upgrade <name>|--all [--image <image>]                 pull, migrate, restart
 #   tapir-instance restart|stop|start <name>
 #   tapir-instance nginx <name>                                         rewrite the nginx site (e.g. HTTPS once the certificate exists)
-#   tapir-instance logs <name> [web|worker|beat|redis]
+#   tapir-instance logs <name> [web|worker|beat]
 #   tapir-instance manage <name> <manage.py arguments>                   e.g. createsuperuser, shell
 #   tapir-instance user-add <name> <mail> [--admin] [--first <name>] [--last <name>]
 #   tapir-instance remove <name> [--purge]                              --purge also drops database and data
 #
 # Every instance gets: /etc/tapir/instances/<name>.env, data in /var/lib/tapir/<name>, the systemd units
-# tapir-<name>-{web,worker,beat,redis} (target tapir-<name>.target), a PostgreSQL database on this machine,
-# a realm in the shared Keycloak (container tapir-keycloak, see tapir-kcadm) and the nginx site
+# tapir-<name>-{web,worker,beat} (target tapir-<name>.target), a PostgreSQL database on this machine,
+# a database number in the shared redis (container tapir-redis), a realm in the shared Keycloak
+# (container tapir-keycloak, see tapir-kcadm) and the nginx site
 # /etc/nginx/sites-available/tapir-<name> (enabling it is left to you; an already enabled site of the
 # domain gets the Keycloak login paths added).
 set -euo pipefail
@@ -41,6 +42,9 @@ KEYCLOAK_IMAGE="${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.8.0}"
 CONTAINER_UID=10100
 INSTANCES="$TAPIR_ETC/instances"
 KC_ENV="$TAPIR_ETC/keycloak.env"
+REDIS_PORT="${REDIS_PORT:-6380}"
+REDIS_IMAGE="${REDIS_IMAGE:-docker.io/library/redis:7.4-alpine}"
+REDIS_DATABASES=64
 NGINX_SNIPPET="$NGINX_DIR/snippets/tapir-keycloak.conf"
 
 # Rewrites an nginx site (read twice): in every server block that listens on 443 - wherever the
@@ -261,13 +265,88 @@ ensure_realm() {  # name realm domain
     set_env "$env" KEYCLOAK_ADMIN_CLIENT_SECRET_KEY "$secret"
 }
 
+# --- shared redis -------------------------------------------------------------------------------
+redis_cli() { podman exec tapir-redis redis-cli -p "$REDIS_PORT" "$@"; }
+
+# One redis container for all instances (celery queue and cache); every instance has its own
+# database number
+ensure_redis() {
+    local unit="$QUADLET_DIR/tapir-redis.container" new
+    assert_own_container tapir-redis tapir-redis.service
+    install -d -m 0750 "$TAPIR_LIB/redis"
+    $CHOWN 999:999 "$TAPIR_LIB/redis"  # redis user of the official image
+    new="# Written by tapir-instance: redis shared by all Tapir instances
+[Unit]
+Description=Redis for Tapir
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=tapir-redis
+Image=$REDIS_IMAGE
+Network=host
+Volume=$TAPIR_LIB/redis:/data
+Exec=redis-server --bind 127.0.0.1 --port $REDIS_PORT --databases $REDIS_DATABASES --appendonly yes --dir /data
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target default.target"
+    if [ "$(cat "$unit" 2>/dev/null)" != "$new" ] || ! podman container exists tapir-redis 2>/dev/null; then
+        if ! podman container exists tapir-redis 2>/dev/null && port_in_use "$REDIS_PORT"; then
+            die "port $REDIS_PORT for redis is already in use"
+        fi
+        log "redis on 127.0.0.1:$REDIS_PORT"
+        podman pull -q "$REDIS_IMAGE" >/dev/null
+        install -d "$QUADLET_DIR"
+        printf '%s\n' "$new" > "$unit"
+        $SYSTEMCTL daemon-reload
+        $SYSTEMCTL restart tapir-redis.service
+    fi
+    for _ in $(seq 1 30); do
+        [ "$(redis_cli ping 2>/dev/null)" = PONG ] && return 0
+        sleep 1
+    done
+    die "redis does not answer, see: journalctl -u tapir-redis"
+}
+
+# Points the instance to its database number in the shared redis; older setups (a redis on the
+# host, one redis container per instance) are moved over and their leftovers removed
+ensure_instance_redis() {  # name
+    local name="$1" env db url used other
+    env="$(instance_env "$name")"
+    db="$(env_value "$env" TAPIR_REDIS_DB)"
+    if [ -z "$db" ]; then
+        used=" "
+        for other in "$INSTANCES"/*.env; do
+            [ -e "$other" ] && [ "$other" != "$env" ] && used="$used$(env_value "$other" TAPIR_REDIS_DB) "
+        done
+        db=0
+        while [ "${used#* "$db" }" != "$used" ]; do db=$((db + 1)); done
+        [ "$db" -lt "$REDIS_DATABASES" ] || die "no free redis database left (at most $REDIS_DATABASES instances)"
+        set_env "$env" TAPIR_REDIS_DB "$db"
+    fi
+    url="redis://127.0.0.1:$REDIS_PORT/$db"
+    if [ "$(env_value "$env" CELERY_BROKER_URL)" != "$url" ]; then
+        log "$name uses redis database $db"
+        set_env "$env" CELERY_BROKER_URL "$url"
+        set_env "$env" CELERY_RESULT_BACKEND "$url"
+    fi
+    if [ -n "$(env_value "$env" TAPIR_REDIS_PORT)" ] || [ -e "$QUADLET_DIR/tapir-$name-redis.container" ]; then
+        $SYSTEMCTL stop "tapir-$name-redis.service" 2>/dev/null || true
+        rm -f "$QUADLET_DIR/tapir-$name-redis.container"
+        unset_env "$env" TAPIR_REDIS_PORT
+        $SYSTEMCTL daemon-reload
+    fi
+}
+
 # --- systemd units ------------------------------------------------------------------------------
 write_units() {  # name
-    local name="$1" env image redis_port
+    local name="$1" env image
     env="$(instance_env "$name")"
     image="$(image_of "$name")"
-    redis_port="$(env_value "$env" TAPIR_REDIS_PORT)"
-    for role in web worker beat redis; do assert_own_container "tapir-$name-$role" "tapir-$name-$role.service"; done
+    for role in web worker beat; do assert_own_container "tapir-$name-$role" "tapir-$name-$role.service"; done
     install -d "$QUADLET_DIR" "$SYSTEMD_DIR"
     cat > "$SYSTEMD_DIR/tapir-$name.target" <<EOF
 # Written by tapir-instance
@@ -277,36 +356,13 @@ Description=Tapir instance $name
 [Install]
 WantedBy=multi-user.target default.target
 EOF
-    local after="network-online.target postgresql.service tapir-keycloak.service"
-    if [ -n "$redis_port" ]; then
-        after="$after tapir-$name-redis.service"
-        cat > "$QUADLET_DIR/tapir-$name-redis.container" <<EOF
-# Written by tapir-instance
-[Unit]
-Description=Tapir $name: redis
-PartOf=tapir-$name.target
-
-[Container]
-ContainerName=tapir-$name-redis
-Image=docker.io/library/redis:7.4-alpine
-Network=host
-Exec=redis-server --bind 127.0.0.1 --port $redis_port --save "" --appendonly no
-
-[Service]
-Restart=always
-
-[Install]
-WantedBy=tapir-$name.target
-EOF
-    else
-        rm -f "$QUADLET_DIR/tapir-$name-redis.container"
-    fi
+    local after="network-online.target postgresql.service tapir-keycloak.service tapir-redis.service"
     for role in web worker beat; do
         cat > "$QUADLET_DIR/tapir-$name-$role.container" <<EOF
 # Written by tapir-instance
 [Unit]
 Description=Tapir $name: $role
-Wants=network-online.target
+Wants=network-online.target tapir-redis.service
 After=$after
 PartOf=tapir-$name.target
 
@@ -330,9 +386,10 @@ EOF
 }
 
 start_instance() {
+    ensure_redis
     $SYSTEMCTL enable "tapir-$1.target" >/dev/null 2>&1 || true
     $SYSTEMCTL restart "tapir-$1.target"
-    for unit in $( [ -n "$(env_value "$(instance_env "$1")" TAPIR_REDIS_PORT)" ] && echo "tapir-$1-redis") $(units "$1"); do
+    for unit in $(units "$1"); do
         $SYSTEMCTL restart "$unit.service"
     done
 }
@@ -514,7 +571,7 @@ cmd_create() {
     printf '%s' "$realm" | grep -qE '^[a-z][a-z0-9-]{1,30}$' || die "invalid realm '$realm'"
     local env; env="$(instance_env "$name")"
     if [ ! -e "$env" ]; then
-        for p in "$port" "$((port + 10000))"; do port_in_use "$p" && die "port $p is already in use"; done
+        port_in_use "$port" && die "port $port is already in use"
         for other in "$INSTANCES"/*.env; do
             [ -e "$other" ] && [ "$(env_value "$other" TAPIR_DOMAIN)" = "$domain" ] && die "$domain is used by $(basename "$other" .env)"
         done
@@ -533,11 +590,8 @@ cmd_create() {
     set_env "$env" ALLOWED_HOSTS "$domain"
     set_env "$env" GUNICORN_BIND "127.0.0.1:$port"
     set_env "$env" ERROR_LOG_DIR /data/log
-    if [ -z "$(env_value "$env" TAPIR_REDIS_PORT)" ]; then
-        set_env "$env" TAPIR_REDIS_PORT "$((port + 10000))"
-        set_env "$env" CELERY_BROKER_URL "redis://127.0.0.1:$((port + 10000))/0"
-        set_env "$env" CELERY_RESULT_BACKEND "redis://127.0.0.1:$((port + 10000))/0"
-    fi
+    ensure_redis
+    ensure_instance_redis "$name"
 
     # Database
     if [ -n "$db_url" ]; then
@@ -611,17 +665,9 @@ cmd_adopt() {
     set_env "$env" ALLOWED_HOSTS "$domain"
     set_env "$env" ERROR_LOG_DIR /data/log
     [ -n "$db_url" ] || create_local_db "$name" "$env"
-    # Own redis container like a created instance (the native package relied on a redis on the host,
-    # which only held the celery queue and the cache); the database stays where it is
-    if [ -z "$(env_value "$env" TAPIR_REDIS_PORT)" ]; then
-        local port redis_port
-        port="$(env_value "$env" GUNICORN_BIND | sed 's/.*://')"
-        redis_port="$(( ${port:-8000} + 10000 ))"
-        port_in_use "$redis_port" && die "port $redis_port for redis is already in use"
-        set_env "$env" TAPIR_REDIS_PORT "$redis_port"
-        set_env "$env" CELERY_BROKER_URL "redis://127.0.0.1:$redis_port/0"
-        set_env "$env" CELERY_RESULT_BACKEND "redis://127.0.0.1:$redis_port/0"
-    fi
+    # The shared redis replaces the redis on the host the native package relied on
+    ensure_redis
+    ensure_instance_redis "$name"
     [ -e "$TAPIR_ETC/tapir.env" ] && mv "$TAPIR_ETC/tapir.env" "$TAPIR_ETC/tapir.env.adopted-by-$name"
 
     install -d -m 0750 "$TAPIR_LIB/$name"
@@ -660,6 +706,8 @@ cmd_keycloak() {  # move an instance to (or refresh it in) the shared Keycloak
     ensure_keycloak 8800
     ensure_realm "$name" "$(env_value "$env" KEYCLOAK_REALM_NAME | grep -v '^tapir$' | grep . || echo "$name")" \
         "$(env_value "$env" TAPIR_DOMAIN)"
+    ensure_instance_redis "$name"
+    write_units "$name"
     start_instance "$name"
     write_nginx "$name"
     check_instance "$name"
@@ -692,6 +740,8 @@ cmd_upgrade() {
         log "Upgrading $name to $(image_of "$name")"
         podman pull -q "$(image_of "$name")" >/dev/null 2>&1 || podman image exists "$(image_of "$name")" \
             || die "image $(image_of "$name") not available"
+        ensure_redis
+        ensure_instance_redis "$name"
         run_once "$name" migrate 2>&1 | tail -n 2
         write_units "$name"
         start_instance "$name"
@@ -705,6 +755,7 @@ cmd_remove() {
     local env; env="$(instance_env "$name")"
     $SYSTEMCTL disable --now "tapir-$name.target" >/dev/null 2>&1 || true
     for unit in $(units "$name") "tapir-$name-redis"; do $SYSTEMCTL stop "$unit.service" 2>/dev/null || true; done
+    local redis_db; redis_db="$(env_value "$env" TAPIR_REDIS_DB)"
     rm -f "$QUADLET_DIR/tapir-$name-"*.container "$SYSTEMD_DIR/tapir-$name.target"
     $SYSTEMCTL daemon-reload
     if [ "$purge" = true ]; then
@@ -712,6 +763,9 @@ cmd_remove() {
         db="$(env_value "$env" DATABASE_CONNECTION | sed -E 's|.*/([^/?]+).*|\1|')"
         if podman container exists tapir-keycloak 2>/dev/null && [ -n "$realm" ]; then kc_login; kcadm delete "realms/$realm" || true; fi
         case "$db" in tapir_*) psql_admin -c "DROP DATABASE IF EXISTS $db" && psql_admin -c "DROP ROLE IF EXISTS $db" ;; esac
+        if [ -n "$redis_db" ] && podman container exists tapir-redis 2>/dev/null; then
+            redis_cli -n "$redis_db" FLUSHDB >/dev/null || true
+        fi
         $RM_DATA "${TAPIR_LIB:?}/$name"
         rm -f "$NGINX_DIR/sites-available/tapir-$name"
         rm -f "$env"
