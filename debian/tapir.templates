@@ -24,6 +24,28 @@ Type: string
 Default: redis://localhost:6379
 Description: Redis URL for celery:
 
+Template: tapir/keycloak_setup
+Type: boolean
+Default: true
+Description: Set up Keycloak on this machine?
+ Runs tapir-setup-keycloak: Keycloak as podman container (systemd unit
+ tapir-keycloak) with its own PostgreSQL database, the realm "tapir" for the
+ public URL, the Keycloak login under the public URL in nginx, and Tapir
+ connected to it. Choose no to use an existing Keycloak.
+
+Template: tapir/keycloak_port
+Type: string
+Default: 8800
+Description: Local port for Keycloak:
+ Keycloak listens on 127.0.0.1 only; nginx forwards the login pages.
+
+Template: tapir/admin_email
+Type: string
+Default:
+Description: E-mail address of the first Tapir admin:
+ Gets a Keycloak login; the initial password is written to
+ /root/tapir-initial-admin.txt. Leave empty to skip.
+
 Template: tapir/keycloak_admin_url
 Type: string
 Default: http://localhost:8080

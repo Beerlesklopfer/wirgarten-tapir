@@ -143,13 +143,18 @@ if [ "$1" = configure ] || [ "$1" = reconfigure ]; then
     # Do not keep the secret in the debconf database
     db_set tapir/keycloak_client_secret ""
 
-    write_nginx_site
-
     db_get tapir/database_auto
     if [ "$RET" = true ]; then
         setup_local_database
     else
         apply database_url DATABASE_CONNECTION
+    fi
+
+    # Keycloak on this machine, set up once (tapir-setup-keycloak also connects Tapir and nginx)
+    keycloak_setup=false
+    db_get tapir/keycloak_setup
+    if [ "$RET" = true ] && [ ! -e /etc/tapir/keycloak.env ]; then
+        case "$host" in localhost|127.0.0.1|"") ;; *) keycloak_setup=true ;; esac
     fi
 
     if grep -qx "DATABASE_CONNECTION=$PLACEHOLDER_DB_URL" "$ENV_FILE"; then
@@ -158,6 +163,23 @@ if [ "$1" = configure ] || [ "$1" = reconfigure ]; then
         { tapir-manage migrate --noinput && tapir-manage parameter_definitions; } >&2 \
             || echo "tapir: WARNING: migrate failed, run 'tapir-manage migrate' and 'tapir-manage parameter_definitions' manually." >&2
     fi
+
+    if [ "$keycloak_setup" = true ]; then
+        if grep -qx "DATABASE_CONNECTION=$PLACEHOLDER_DB_URL" "$ENV_FILE"; then
+            echo "tapir: Keycloak not set up, the database is missing - run 'tapir-setup-keycloak' later." >&2
+        else
+            db_get tapir/keycloak_port
+            port="${RET:-8800}"
+            db_get tapir/admin_email
+            admin_email="$RET"
+            # tapir.target has to run for the checks of the setup script
+            if [ -d /run/systemd/system ]; then systemctl enable --now tapir.target >&2 || true; fi
+            tapir-setup-keycloak --domain "$host" --port "$port" ${admin_email:+--admin-email "$admin_email"} >&2 \
+                || echo "tapir: WARNING: Keycloak setup failed - fix the cause and run: tapir-setup-keycloak --domain $host --port $port" >&2
+        fi
+    fi
+
+    write_nginx_site
 fi
 
 db_stop

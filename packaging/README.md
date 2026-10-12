@@ -56,6 +56,24 @@ The certificate defaults to `/etc/letsencrypt/live/<host>/`; other paths can be 
 local changes; the package then leaves the file alone. Keycloak itself needs `KC_HOSTNAME=<public URL>`,
 `KC_PROXY_HEADERS=xforwarded` and the redirect URI `<public URL>/*` for the `tapir-backend` client.
 
+## Keycloak
+
+On a fresh installation with a public URL, debconf offers to set up Keycloak on the same machine
+("Set up Keycloak on this machine?", local port, e-mail of the first admin). `tapir-setup-keycloak` then
+- runs Keycloak as podman container with the systemd unit `tapir-keycloak`, on `127.0.0.1:<port>` (default 8800),
+  with its own PostgreSQL database `keycloak`,
+- imports the realm `tapir` for the public URL with a freshly generated client secret and the Tapir login theme,
+- takes the mail server for verification and password mails from `/etc/tapir/tapir.env`,
+- connects Tapir (`SITE_URL`, `ALLOWED_HOSTS`, `KEYCLOAK_*`) and restarts it,
+- creates the first admin (initial password in `/root/tapir-initial-admin.txt`),
+- adds the Keycloak login paths to an already enabled nginx site of the domain (backup, `nginx -t`, reload) and
+  checks the result.
+
+The script is idempotent and can also be run by hand, e.g. on an existing installation:
+`sudo tapir-setup-keycloak --domain tapir.example.org --port 8800 --admin-email you@example.org`.
+Secrets are kept in `/etc/tapir/keycloak.env`. The Keycloak admin console is not public; reach it with
+`ssh -L 8800:127.0.0.1:8800 root@<server>` and http://localhost:8800/admin (user `admin`).
+
 ## Building locally
 
 Needs docker or podman. The build runs as root in a `debian:trixie` container

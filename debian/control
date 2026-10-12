@@ -24,7 +24,7 @@ Depends: ${misc:Depends},
          libpangoft2-1.0-0,
          locales,
          nodejs
-Recommends: postgresql, redis-server
+Recommends: postgresql, redis-server, podman, curl
 Suggests: nginx | caddy
 Description: Member and subscription management for solidarity farms (WirGarten)
  Tapir manages members, subscriptions, coop shares, deliveries and payments.
