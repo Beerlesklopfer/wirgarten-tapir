@@ -461,6 +461,10 @@ check_instance() {  # name
     issuer="$(curl -fs "$(env_value "$env" KEYCLOAK_ADMIN_SERVER_URL)/realms/$realm/.well-known/openid-configuration" \
         | sed -n 's/.*"issuer":"\([^"]*\)".*/\1/p')"
     check "Keycloak realm $realm, issuer https://$domain/realms/$realm" test "$issuer" = "https://$domain/realms/$realm"
+    check "Tapir reaches redis (cache and celery)" tapir_shell "$name" "
+from django.core.cache import cache
+cache.set('tapir-instance-check', 1, 10)
+assert cache.get('tapir-instance-check') == 1"
     check "Tapir reaches the Keycloak admin API" tapir_shell "$name" "
 from tapir.accounts.services.keycloak_user_manager import KeycloakUserManager
 KeycloakUserManager.get_keycloak_client({}).get_users({'max': 1})"
@@ -607,7 +611,17 @@ cmd_adopt() {
     set_env "$env" ALLOWED_HOSTS "$domain"
     set_env "$env" ERROR_LOG_DIR /data/log
     [ -n "$db_url" ] || create_local_db "$name" "$env"
-    # localhost inside the container is the host as well (network host); redis and the database stay
+    # Own redis container like a created instance (the native package relied on a redis on the host,
+    # which only held the celery queue and the cache); the database stays where it is
+    if [ -z "$(env_value "$env" TAPIR_REDIS_PORT)" ]; then
+        local port redis_port
+        port="$(env_value "$env" GUNICORN_BIND | sed 's/.*://')"
+        redis_port="$(( ${port:-8000} + 10000 ))"
+        port_in_use "$redis_port" && die "port $redis_port for redis is already in use"
+        set_env "$env" TAPIR_REDIS_PORT "$redis_port"
+        set_env "$env" CELERY_BROKER_URL "redis://127.0.0.1:$redis_port/0"
+        set_env "$env" CELERY_RESULT_BACKEND "redis://127.0.0.1:$redis_port/0"
+    fi
     [ -e "$TAPIR_ETC/tapir.env" ] && mv "$TAPIR_ETC/tapir.env" "$TAPIR_ETC/tapir.env.adopted-by-$name"
 
     install -d -m 0750 "$TAPIR_LIB/$name"
