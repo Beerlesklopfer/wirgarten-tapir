@@ -1,4 +1,4 @@
-# Managed by the tapir package (dpkg-reconfigure tapir). Delete this line to keep local changes.
+# Managed by the tapir package (tapir-instance). Delete this line to keep local changes.
 # Tapir for @HOST@: gunicorn on @UPSTREAM@#KC#, Keycloak login pages from @KEYCLOAK@
 #HTTPS## TLS certificate: @CERT@
 
