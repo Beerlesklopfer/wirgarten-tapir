@@ -78,6 +78,7 @@ IMPORT_TYPES = {
                 "Vereinsmitgliedschafttyp",
                 "Vereinsmitgliedschaft Start_Date",
                 "Vereinsmitgliedschaft End_Date",
+                "Lieblingsbroten",
             ),
             example={
                 "Nr": "1",
