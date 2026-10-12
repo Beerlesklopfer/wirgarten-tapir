@@ -77,7 +77,7 @@ warn() { printf '\033[33mWARNING: %s\033[0m\n' "$*" >&2; }
 die() { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 random_string() { tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1" || true; }
 to_bool() { case "$1" in [Tt]rue|1|yes) echo true ;; *) echo false ;; esac; }
-env_value() { sed -n "s/^$2=//p" "$1" 2>/dev/null | tail -n 1; }
+env_value() { sed -n "s/^$2=//p" "$1" 2>/dev/null | tail -n 1 || true; }
 set_env() {  # file key value
     local escaped
     escaped="$(printf '%s' "$3" | sed 's/[&|\\]/\\&/g')"
@@ -248,7 +248,8 @@ ensure_realm() {  # name realm domain
             -s "smtpServer.fromDisplayName=$(env_value "$env" EMAIL_HOST_SENDER_NAME)" \
             -s "smtpServer.starttls=$(to_bool "$(env_value "$env" EMAIL_USE_TLS | grep . || echo true)")" \
             -s "smtpServer.ssl=$(to_bool "$(env_value "$env" EMAIL_USE_SSL)")" \
-            -s "smtpServer.auth=true" -s "smtpServer.user=$smtp_user" \
+            -s "smtpServer.auth=$([ -n "$smtp_user" ] && echo true || echo false)" \
+            -s "smtpServer.user=$smtp_user" \
             -s "smtpServer.password=$(env_value "$env" EMAIL_HOST_PASSWORD)"
     else
         warn "no EMAIL_HOST in $env - Keycloak cannot send verification and password mails for $realm yet"
@@ -472,6 +473,21 @@ KeycloakUserManager.get_keycloak_client({}).get_users({'max': 1})"
     return "$failed"
 }
 
+# PostgreSQL role and database tapir_<name> on this machine with a new password
+create_local_db() {  # name env
+    local role="tapir_${1//-/_}" password
+    password="$(random_string 32)"
+    if [ "$(psql_admin -c "SELECT 1 FROM pg_roles WHERE rolname = '$role'")" = 1 ]; then
+        psql_admin -c "ALTER ROLE $role LOGIN PASSWORD '$password'"
+    else
+        psql_admin -c "CREATE ROLE $role LOGIN PASSWORD '$password'"
+    fi
+    [ "$(psql_admin -c "SELECT 1 FROM pg_database WHERE datname = '$role'")" = 1 ] \
+        || psql_admin -c "CREATE DATABASE $role OWNER $role"
+    set_env "$2" DATABASE_CONNECTION "postgresql://$role:$password@$PG_HOST:$PG_PORT/$role"
+    log "PostgreSQL database $role"
+}
+
 # --- commands -----------------------------------------------------------------------------------
 cmd_create() {
     local name; name="$(printf '%s' "${1:-}" | tr 'A-Z' 'a-z')"; shift || true
@@ -523,17 +539,7 @@ cmd_create() {
     if [ -n "$db_url" ]; then
         set_env "$env" DATABASE_CONNECTION "$db_url"
     elif env_value "$env" DATABASE_CONNECTION | grep -q 'CHANGE_ME'; then
-        local role="tapir_${name//-/_}" password
-        password="$(random_string 32)"
-        if [ "$(psql_admin -c "SELECT 1 FROM pg_roles WHERE rolname = '$role'")" = 1 ]; then
-            psql_admin -c "ALTER ROLE $role LOGIN PASSWORD '$password'"
-        else
-            psql_admin -c "CREATE ROLE $role LOGIN PASSWORD '$password'"
-        fi
-        [ "$(psql_admin -c "SELECT 1 FROM pg_database WHERE datname = '$role'")" = 1 ] \
-            || psql_admin -c "CREATE DATABASE $role OWNER $role"
-        set_env "$env" DATABASE_CONNECTION "postgresql://$role:$password@$PG_HOST:$PG_PORT/$role"
-        log "PostgreSQL database $role"
+        create_local_db "$name" "$env"
     fi
 
     install -d -m 0750 "$TAPIR_LIB/$name"
@@ -566,22 +572,43 @@ cmd_adopt() {
         esac
     done
     env="$(instance_env "$name")"
-    [ -e "$env" ] && die "instance $name exists already"
-    [ -r "$old_env" ] || die "no native installation ($old_env)"
+    if [ -e "$env" ] && [ -e "$old_env.adopted-by-$name" ]; then
+        log "Continuing the adoption of $name"
+        old_env="$old_env.adopted-by-$name"
+    else
+        [ -e "$env" ] && die "instance $name exists already"
+        [ -r "$old_env" ] || die "no native installation ($old_env)"
+    fi
+    domain="${domain:-$(env_value "$env" TAPIR_DOMAIN)}"
     domain="${domain:-$(env_value "$old_env" SITE_URL | sed -E 's|^[a-z]+://||; s|[:/].*$||')}"
     case "$domain" in ""|localhost|127.0.0.1) die "no public domain - call with --domain <host>" ;; esac
+
+    # The database must answer before anything is moved
+    local db_url; db_url="$(env_value "$env" DATABASE_CONNECTION | grep . || env_value "$old_env" DATABASE_CONNECTION)"
+    if printf '%s' "$db_url" | grep -q 'CHANGE_ME'; then
+        # The native installation never had a database: the instance gets its own
+        db_url=""
+    elif command -v psql >/dev/null; then
+        psql "$db_url" -tAc 'SELECT 1' >/dev/null 2>&1 || die "the database does not accept DATABASE_CONNECTION from $old_env.
+  Check it with:  psql \"\$(sed -n 's/^DATABASE_CONNECTION=//p' $old_env)\" -c 'SELECT 1'
+  Then fix the URL or set the password of the role, e.g.: runuser -u postgres -- psql -c \"ALTER ROLE tapir PASSWORD '...'\""
+    else
+        warn "psql not found - the database connection is checked only by the migration"
+    fi
+
     log "Adopting the native installation as instance $name (https://$domain)"
     $SYSTEMCTL disable --now tapir.target tapir-web tapir-celery tapir-celery-beat >/dev/null 2>&1 || true
 
     install -d -m 0750 "$INSTANCES"
-    install -m 0640 "$old_env" "$env"
+    [ -e "$env" ] || install -m 0640 "$old_env" "$env"
     set_env "$env" TAPIR_DOMAIN "$domain"
-    set_env "$env" TAPIR_IMAGE "$TAPIR_IMAGE_DEFAULT"
+    [ -n "$(env_value "$env" TAPIR_IMAGE)" ] || set_env "$env" TAPIR_IMAGE "$TAPIR_IMAGE_DEFAULT"
     set_env "$env" SITE_URL "https://$domain"
     set_env "$env" ALLOWED_HOSTS "$domain"
     set_env "$env" ERROR_LOG_DIR /data/log
+    [ -n "$db_url" ] || create_local_db "$name" "$env"
     # localhost inside the container is the host as well (network host); redis and the database stay
-    mv "$old_env" "$old_env.adopted-by-$name"
+    [ -e "$TAPIR_ETC/tapir.env" ] && mv "$TAPIR_ETC/tapir.env" "$TAPIR_ETC/tapir.env.adopted-by-$name"
 
     install -d -m 0750 "$TAPIR_LIB/$name"
     for item in media filepond_temp_uploads filepond_stored_uploads emails_from_celery celerybeat-schedule; do
