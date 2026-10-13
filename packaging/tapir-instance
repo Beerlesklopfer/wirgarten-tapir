@@ -1124,6 +1124,29 @@ $( [ "$passive" = yes ] && printf '%s\n' "# Passive = yes: director and storage 
 
 EOF
 }
+# Own pool for the Tapir backups (like one pool per host); BAREOS_POOL_CREATE=no uses an existing
+# pool BAREOS_POOL instead, or the one of the JobDefs when BAREOS_POOL is empty
+bareos_pool_name() {
+    if [ "$(bareos_setting BAREOS_POOL_CREATE yes)" = yes ]; then bareos_setting BAREOS_POOL Tapir
+    else bareos_setting BAREOS_POOL ""; fi
+}
+bareos_pool() {
+    local pool; pool="$(bareos_pool_name)"
+    cat <<EOF
+# Written by tapir-instance bareos - Pool $pool for the Tapir backups of $(bareos_client_address)
+Pool {
+  Name = "$pool"
+  Description = "Tapir backups"
+  Pool Type = Backup
+  Label Format = "$(bareos_setting BAREOS_POOL_LABEL "$pool-")"
+  Maximum Volume Bytes = $(bareos_setting BAREOS_POOL_VOLUME_BYTES "50 g")
+  Maximum Volumes = $(bareos_setting BAREOS_POOL_VOLUMES 100)
+  Volume Retention = $(bareos_setting BAREOS_POOL_RETENTION "6 months")
+  AutoPrune = yes
+  Recycle = yes
+}
+EOF
+}
 # Client resource of this machine for the director: passive by default, so the director and the
 # storage daemon connect to the file daemon and the server never has to reach the director's network
 bareos_client() {
@@ -1156,11 +1179,11 @@ bareos_job() {  # name | --shared
     local target="$1" client jobdefs schedule pool storage job title files exclude
     client="$(bareos_client_name)"
     jobdefs="$(bareos_setting BAREOS_JOBDEFS DefaultJob)"
-    if [ "$jobdefs" = none ] && { [ -z "$(bareos_setting BAREOS_POOL "")" ] || [ -z "$(bareos_setting BAREOS_STORAGE "")" ]; }; then
-        warn "BAREOS_JOBDEFS=none needs BAREOS_POOL and BAREOS_STORAGE in $BAREOS_ENV"
+    if [ "$jobdefs" = none ] && { [ -z "$(bareos_pool_name)" ] || [ -z "$(bareos_setting BAREOS_STORAGE "")" ]; }; then
+        warn "BAREOS_JOBDEFS=none needs BAREOS_STORAGE (and a pool) in $BAREOS_ENV"
     fi
     schedule="$(bareos_setting BAREOS_SCHEDULE "")"
-    pool="$(bareos_setting BAREOS_POOL "")"
+    pool="$(bareos_pool_name)"
     storage="$(bareos_setting BAREOS_STORAGE "")"
     if [ "$target" = --shared ]; then
         job=tapir-shared; title="Tapir: Keycloak database, settings and fonts shared by all instances"
@@ -1200,6 +1223,7 @@ $( if [ "$jobdefs" = none ]; then
   FileSet = "$job"
 $( [ -n "$schedule" ] && echo "  Schedule = \"$schedule\"" )
 $( [ -n "$pool" ] && echo "  Pool = \"$pool\"" )
+$( [ -n "$pool" ] && [ "$(bareos_setting BAREOS_POOL_CREATE yes)" = yes ] && printf '  %s Backup Pool = "%s"\n' Full "$pool" Incremental "$pool" Differential "$pool" )
 $( [ -n "$storage" ] && echo "  Storage = \"$storage\"" )
   # One bootstrap file per job: the default (%c.bsr) would be shared by all jobs of the client
   Write Bootstrap = "/var/lib/bareos/%c-%n.bsr"
@@ -1211,6 +1235,23 @@ $( [ -n "$storage" ] && echo "  Storage = \"$storage\"" )
   }
 }
 EOF
+}
+# Writes a Client or Pool resource to <dir>/<kind>/<name>.conf - never replaces one of that name the
+# director already has from elsewhere
+bareos_write_resource() {  # dir kind name generator
+    local dir="$1" kind="$2" name="$3" file
+    for file in "$dir/$kind"/*.conf; do
+        [ -e "$file" ] && [ "$file" != "$dir/$kind/$name.conf" ] \
+            && grep -qiE "^[[:space:]]*Name[[:space:]]*=[[:space:]]*\"?$name\"?[[:space:]]*$" "$file" \
+            && { log "Bareos $kind $name exists in $file - kept"; return 0; }
+    done
+    if [ -e "$dir/$kind/$name.conf" ] && ! grep -qs '^# Written by tapir-instance' "$dir/$kind/$name.conf"; then
+        log "Bareos $kind $name exists in $dir/$kind/$name.conf - kept"; return 0
+    fi
+    install -d "$dir/$kind"
+    ( umask 027; "$4" > "$dir/$kind/$name.conf" )
+    chgrp bareos "$dir/$kind/$name.conf" 2>/dev/null || true
+    log "Bareos $kind $name in $dir/$kind/$name.conf"
 }
 # Writes (or with --remove deletes) the resources of one job in a bareos-dir.d directory
 bareos_write() {  # dir name|--shared [--remove]
@@ -1225,22 +1266,9 @@ bareos_write() {  # dir name|--shared [--remove]
     fi
     install -d "$dir/job"
     if [ "$target" = --shared ]; then
-        local client file own=true
-        client="$(bareos_client_name)"
-        # Never replace a Client resource of that name the director already has from elsewhere
-        for file in "$dir"/client/*.conf; do
-            [ -e "$file" ] && [ "$file" != "$dir/client/$client.conf" ] \
-                && grep -qiE "^[[:space:]]*Name[[:space:]]*=[[:space:]]*\"?$client\"?[[:space:]]*$" "$file" && own=false
-        done
-        [ -e "$dir/client/$client.conf" ] && ! grep -qs '^# Written by tapir-instance' "$dir/client/$client.conf" && own=false
-        if [ "$own" = true ]; then
-            install -d "$dir/client"
-            ( umask 027; bareos_client > "$dir/client/$client.conf" )
-            chgrp bareos "$dir/client/$client.conf" 2>/dev/null || true
-            log "Bareos client $client in $dir"
-        else
-            log "Bareos client $client exists in $dir - kept"
-        fi
+        bareos_write_resource "$dir" client "$(bareos_client_name)" bareos_client
+        [ "$(bareos_setting BAREOS_POOL_CREATE yes)" = yes ] \
+            && bareos_write_resource "$dir" pool "$(bareos_pool_name)" bareos_pool
     fi
     # FileSet and Job of an instance in one file; older versions wrote the FileSet to fileset/
     bareos_job "$target" | grep -v '^$' > "$dir/job/$job.conf"
@@ -1289,6 +1317,10 @@ cmd_bareos() {  # name|--shared|--all [--write <dir>]
                 bareos_instructions "$first"
                 printf '# [bareos-dir]  File: %s/client/%s.conf\n' "$(bareos_dir_conf)" "$(bareos_client_name)"
                 bareos_client; echo
+                if [ "$(bareos_setting BAREOS_POOL_CREATE yes)" = yes ]; then
+                    printf '# [bareos-dir]  File: %s/pool/%s.conf\n' "$(bareos_dir_conf)" "$(bareos_pool_name)"
+                    bareos_pool; echo
+                fi
                 printf '# [bareos-dir]  File: %s/job/tapir-shared.conf\n' "$(bareos_dir_conf)"
             else
                 printf '# [bareos-dir]  File: %s/job/tapir-%s.conf\n' "$(bareos_dir_conf)" "$target"
