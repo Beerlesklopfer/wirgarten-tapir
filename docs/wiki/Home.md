@@ -5,5 +5,5 @@ Genossenschaftsanteile, Verträge, Verteilstationen und Kapazitäten, Lieferunge
 Mails – und als optionale Module Bäckerei und Anbauplanung.
 
 - **[Handbuch](Handbuch)** – für Mitglieder, Solawi-Team und Gärtnerei
-- **[Betrieb](Betrieb)** – Installation und Betrieb auf dem Server mit `tapir-instance`
+- **[Betrieb](Betrieb)** – Installation und Betrieb auf dem Server mit `tapir-instance`, Datensicherung mit Bareos
 - **[Development](Development)** – Dokumentation für Entwicklerinnen und Entwickler

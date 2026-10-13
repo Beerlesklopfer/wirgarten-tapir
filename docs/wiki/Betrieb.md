@@ -17,6 +17,7 @@ Seiten dieses Abschnitts:
 | [tapir-instance](Betrieb-tapir-instance) | vollständige Befehlsreferenz |
 | [Konfiguration](Betrieb-Konfiguration) | env-Datei der Instanz, Mail, gesperrte Parameter, Theme und Schriften |
 | [Keycloak und Benutzer](Betrieb-Keycloak) | `tapir-kcadm`, Admin-Konsole, Rollen, Passwörter |
+| [Datensicherung (Bareos)](Betrieb-Datensicherung) | eigener Bareos-Job je Instanz, `backup`, `restore`, Wiederherstellung des ganzen Servers |
 | [Fehlersuche](Betrieb-Fehlersuche) | Prüfungen, Logs, bekannte Fehler und ihre Behebung |
 
 Für Entwicklerinnen und Entwickler (Image-Bau, CI, APT-Repository):
