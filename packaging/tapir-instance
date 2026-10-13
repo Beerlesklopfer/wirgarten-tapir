@@ -1048,6 +1048,22 @@ bareos_fd_password() {  # director
     done
     return 0
 }
+# Director that backs up this machine: BAREOS_DIRECTOR, otherwise the only director the file daemon
+# knows that is not a tray monitor (Monitor = yes), otherwise bareos-dir
+bareos_director() {
+    local name file found=""
+    name="$(bareos_setting BAREOS_DIRECTOR "")"
+    [ -n "$name" ] && { echo "$name"; return 0; }
+    for file in "$(bareos_setting BAREOS_FD_CONFIG /etc/bareos/bareos-fd.d)/director"/*.conf; do
+        [ -r "$file" ] || continue
+        grep -qiE '^[[:space:]]*Monitor[[:space:]]*=[[:space:]]*yes' "$file" && continue
+        name="$(sed -nE 's/^[[:space:]]*Name[[:space:]]*=[[:space:]]*"?([^"#[:space:]]+)"?.*/\1/ip' "$file" | head -n 1)"
+        [ -n "$name" ] || continue
+        [ -z "$found" ] || { echo bareos-dir; return 0; }   # more than one: no guess
+        found="$name"
+    done
+    echo "${found:-bareos-dir}"
+}
 # File of the director's resource in the file daemon configuration (empty if there is none)
 bareos_fd_file() {  # director
     local file
@@ -1062,7 +1078,7 @@ bareos_fd_file() {  # director
 bareos_instructions() {  # first instance (for the test command)
     local client director address passive fd_dir fd_file status target
     client="$(bareos_client_name)"
-    director="$(bareos_setting BAREOS_DIRECTOR bareos-dir)"
+    director="$(bareos_director)"
     address="$(bareos_client_address)"
     passive="$(bareos_setting BAREOS_PASSIVE yes)"
     fd_dir="$(bareos_setting BAREOS_FD_CONFIG /etc/bareos/bareos-fd.d)"
@@ -1113,7 +1129,7 @@ EOF
 bareos_client() {
     local client director address passive password
     client="$(bareos_client_name)"
-    director="$(bareos_setting BAREOS_DIRECTOR bareos-dir)"
+    director="$(bareos_director)"
     address="$(bareos_client_address)"
     passive="$(bareos_setting BAREOS_PASSIVE yes)"
     password="$(bareos_fd_password "$director")"
