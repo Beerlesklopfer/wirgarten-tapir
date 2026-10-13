@@ -19,6 +19,8 @@ Debian 13 trixie) only brings the tools and templates. Complete reference (Germa
 | `/var/lib/tapir/redis` | data of the shared redis (append-only file) |
 | `/etc/systemd/system/tapir-<name>.target` | starts/stops all units of an instance |
 | `/etc/nginx/sites-available/tapir-<name>` | nginx site of an instance, enabling it is manual |
+| `/var/backups/tapir/<name>` | latest database dump and realm export of an instance (`tapir-instance backup`) |
+| `/etc/tapir/bareos.env` | settings of the Bareos jobs (`/usr/share/tapir/bareos.env.example`) |
 
 ```mermaid
 flowchart LR
@@ -106,6 +108,23 @@ them the themes fall back to their free fonts.
 sudo tapir-instance upgrade --all                       # pull the image, migrate, restart, check
 sudo tapir-instance upgrade ackervielfalt --image ghcr.io/beerlesklopfer/wirgarten-tapir:0.3.0
 ```
+
+## Backups (Bareos)
+
+Every instance has its own Bareos job `tapir-<name>`; one job `tapir-shared` covers the Keycloak
+database, `/etc/tapir` and the licensed theme fonts. Before saving, the job runs
+`tapir-instance backup <name>` on the client: database dump (`pg_dump -Fc`) and an export of the
+Keycloak realm with users and password hashes go to `/var/backups/tapir/<name>/` (root only).
+
+```sh
+sudo cp /usr/share/tapir/bareos.env.example /etc/tapir/bareos.env   # BAREOS_CLIENT, JobDefs, ...
+sudo tapir-instance bareos --all                                   # FileSets and Jobs for the director
+sudo tapir-instance bareos --all --write /etc/bareos/bareos-dir.d  # director on this machine
+sudo tapir-instance restore ackervielfalt                          # after Bareos restored the files
+```
+
+With `BAREOS_CONFIG_DIR` set, `create`, `adopt` and `remove` add and delete the jobs by themselves.
+Details: [wiki: Datensicherung](https://github.com/Beerlesklopfer/wirgarten-tapir/wiki/Betrieb-Datensicherung).
 
 ## Images and packages built locally
 

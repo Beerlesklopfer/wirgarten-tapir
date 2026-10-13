@@ -11,6 +11,7 @@ Package: tapir
 Architecture: all
 Depends: ${misc:Depends}, podman (>= 4.4), curl, iproute2
 Recommends: postgresql, nginx
+Suggests: bareos-filedaemon
 Description: Member and subscription management for solidarity farms (WirGarten)
  Tapir manages members, subscriptions, coop shares, deliveries and payments.
  .

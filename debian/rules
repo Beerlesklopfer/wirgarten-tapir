@@ -11,6 +11,7 @@ override_dh_auto_install:
 	install -D -m 0770 packaging/tapir-kcadm debian/tapir/usr/sbin/tapir-kcadm
 	install -D -m 0644 packaging/tapir.env.example debian/tapir/usr/share/tapir/tapir.env.example
 	install -D -m 0644 packaging/nginx-site.conf.in debian/tapir/usr/share/tapir/nginx-site.conf.in
+	install -D -m 0644 packaging/bareos.env.example debian/tapir/usr/share/tapir/bareos.env.example
 	install -D -m 0644 packaging/keycloak/tapir-realm.json.in debian/tapir/usr/share/tapir/keycloak/tapir-realm.json.in
 	mkdir -p debian/tapir/usr/share/tapir/keycloak/themes
 	cp -rL packaging/keycloak/themes/. debian/tapir/usr/share/tapir/keycloak/themes/
