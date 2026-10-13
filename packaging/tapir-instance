@@ -1046,6 +1046,7 @@ bareos_fd_password() {  # director
         sed -nE 's/^[[:space:]]*Password[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/ip' "$file" | head -n 1
         return 0
     done
+    return 0
 }
 # File of the director's resource in the file daemon configuration (empty if there is none)
 bareos_fd_file() {  # director
@@ -1054,6 +1055,7 @@ bareos_fd_file() {  # director
         [ -r "$file" ] && grep -qiE "^[[:space:]]*Name[[:space:]]*=[[:space:]]*\"?$1\"?[[:space:]]*(#.*)?$" "$file" \
             && { echo "$file"; return 0; }
     done
+    return 0
 }
 # Instructions as comments at the top of the generated configuration: what the file daemon on this
 # server needs, where the rest goes on the director, how to test it
@@ -1066,7 +1068,13 @@ bareos_instructions() {  # first instance (for the test command)
     fd_dir="$(bareos_setting BAREOS_FD_CONFIG /etc/bareos/bareos-fd.d)"
     fd_file="$(bareos_fd_file "$director")"
     if [ -n "$fd_file" ]; then status="found: $fd_file"
-    else status="NOT FOUND - install bareos-filedaemon, or create $fd_dir/director/$director.conf as shown"; fi
+    else
+        local known
+        known="$(sed -nE 's/^[[:space:]]*Name[[:space:]]*=[[:space:]]*"?([^"#[:space:]]+)"?.*/\1/ip' "$fd_dir"/director/*.conf 2>/dev/null | tr '\n' ' ' || true)"
+        status="NOT FOUND - no director '$director' in $fd_dir/director/${known:+ (there: $known- set BAREOS_DIRECTOR in $BAREOS_ENV)}"
+        [ -n "$known" ] || status="$status - install bareos-filedaemon, or create $fd_dir/director/$director.conf as shown"
+        warn "$status"
+    fi
     target="$(bareos_dir_conf)/job/tapir-${client%-fd}.conf"
     cat <<EOF
 # ==================================================================================================
