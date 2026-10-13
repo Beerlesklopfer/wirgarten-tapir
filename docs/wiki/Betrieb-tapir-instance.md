@@ -479,8 +479,8 @@ Erzeugt mit `--shared`/`--all` den Client dieses Servers (Passwort aus
 `/etc/bareos/bareos-fd.d/director/`, standardmäßig `Passive = yes`) und je Instanz ein FileSet und
 einen Job `tapir-<name>`, der vor dem Lesen
 `tapir-instance backup <name>` auf dem Client ausführt. Einstellungen aus `/etc/tapir/bareos.env`
-(Client, JobDefs, Zeitplan, Pool, Storage). `--write` legt `job/tapir-<name>.conf` und
-`fileset/tapir-<name>.conf` (und `client/<client>.conf`) in einem `bareos-dir.d` ab und lädt den Director neu. Mit
+(Client, JobDefs, Zeitplan, Pool, Storage). `--write` legt `client/<client>.conf` und je Instanz `job/tapir-<name>.conf`
+(FileSet und Job gemeinsam) in einem `bareos-dir.d` ab und lädt den Director neu. Mit
 `BAREOS_CONFIG_DIR` tun `create` und `adopt` das von selbst, `remove` löscht die Dateien.
 Ausführlich: [Datensicherung mit Bareos](Betrieb-Datensicherung).
 

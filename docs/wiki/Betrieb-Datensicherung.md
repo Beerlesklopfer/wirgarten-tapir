@@ -151,8 +151,8 @@ sudo editor /etc/tapir/bareos.env
 
 | Variable | Vorgabe | Bedeutung |
 |---|---|---|
-| `BAREOS_CLIENT` | `<kurzer Hostname>-fd` | Name des Clients im Director |
-| `BAREOS_CLIENT_ADDRESS` | `hostname -f` | Adresse, unter der der Director den Server erreicht, z. B. `forgeiec.io` |
+| `BAREOS_CLIENT` | `<kurzer Hostname, klein>-fd` | Name des Clients im Director |
+| `BAREOS_CLIENT_ADDRESS` | `hostname -f`, ohne Domain die Domain der ersten Instanz | Adresse, unter der der Director den Server erreicht, z. B. `forgeiec.io` |
 | `BAREOS_DIRECTOR` | `bareos-dir` | Name des Directors in `bareos-fd.d/director/`; dessen Passwort kommt in den Client |
 | `BAREOS_PASSIVE` | `yes` | passiver Client (Director im Heimnetz), `no` für einen Director, den der Server erreichen kann |
 | `BAREOS_FD_CONFIG` | `/etc/bareos/bareos-fd.d` | Konfiguration des File Daemon auf dem Server |
@@ -175,8 +175,11 @@ sudo tapir-instance bareos ackervielfalt                                       #
 
 Die Datei beginnt mit einer **Anleitung in Kommentaren**: was im File Daemon auf dem Server für
 den Director stehen muss (mit Prüfung, ob die Datei da ist), wohin die Datei auf dem Director
-gehört, welche Rechte sie braucht und wie man testet. Bareos überliest die Kommentare; die Datei
-lässt sich unverändert einfügen.
+gehört, welche Rechte sie braucht und wie man testet. Jeder Teil beginnt mit seiner Zieldatei,
+z. B. `# File: /etc/bareos/bareos-dir.d/client/forgeiec-fd.conf` und
+`# File: /etc/bareos/bareos-dir.d/job/tapir-ackervielfalt.conf` (FileSet und Job zusammen). Man
+kann die Teile so verteilen oder die ganze Datei in eine einzige `*.conf` legen; Bareos überliest
+die Kommentare.
 
 `--all` (und `--shared`) enthält den **Client** mit dem Passwort des File Daemon, die Datei deshalb
 nur für root lesbar ablegen und nach dem Kopieren löschen. Auf dem Director als eine Datei
@@ -193,8 +196,8 @@ sudo -u bareos bareos-dir -t && echo reload | sudo bconsole
 sudo tapir-instance bareos --all --write /etc/bareos/bareos-dir.d
 ```
 
-`--write` legt `client/<client>.conf`, `fileset/tapir-*.conf` und `job/tapir-*.conf` an (Rechte
-`0640`, Gruppe `bareos`). Einen Client gleichen Namens, den der Director schon aus einer anderen
+`--write` legt `client/<client>.conf` und je Instanz `job/tapir-<name>.conf` mit FileSet und Job an
+(Rechte `0640`, Gruppe `bareos`); FileSets einer älteren Version unter `fileset/` räumt es weg. Einen Client gleichen Namens, den der Director schon aus einer anderen
 Datei kennt (z. B. `bareos-fd` aus dem Paket), lässt es stehen.
 
 Mit `BAREOS_CONFIG_DIR=/etc/bareos/bareos-dir.d` in `bareos.env` geschieht das danach von selbst:
