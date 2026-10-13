@@ -1020,7 +1020,15 @@ bareos_setting() {  # key default
 }
 # Name and address of this machine as Bareos client. Without an FQDN from hostname the domain of an
 # instance is used: it points to this server as well
-bareos_client_name() { bareos_setting BAREOS_CLIENT "$(hostname -s | tr 'A-Z' 'a-z')-fd"; }
+# Name: BAREOS_CLIENT, otherwise the name the file daemon gives itself (bareos-fd.d/client/*.conf),
+# otherwise <short host name>-fd
+bareos_client_name() {
+    local name
+    name="$(bareos_setting BAREOS_CLIENT "")"
+    [ -n "$name" ] || name="$(sed -nE 's/^[[:space:]]*Name[[:space:]]*=[[:space:]]*"?([^"#[:space:]]+)"?.*/\1/ip' \
+        "$(bareos_setting BAREOS_FD_CONFIG /etc/bareos/bareos-fd.d)"/client/*.conf 2>/dev/null | head -n 1 || true)"
+    echo "${name:-$(hostname -s | tr 'A-Z' 'a-z')-fd}"
+}
 bareos_client_address() {
     local address env
     address="$(bareos_setting BAREOS_CLIENT_ADDRESS "")"
