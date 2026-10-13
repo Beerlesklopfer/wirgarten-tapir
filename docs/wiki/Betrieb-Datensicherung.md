@@ -69,7 +69,8 @@ sudo apt install bareos-filedaemon
 ```
 
 `bareos-fd` läuft unter Debian als root; das ist nötig, weil `tapir-instance` nur für root ist.
-Der Director, der sichern darf, steht in `/etc/bareos/bareos-fd.d/director/<director>.conf`:
+Den Director, der sichern darf, legt das Paket schon an:
+`/etc/bareos/bareos-fd.d/director/bareos-dir.conf` mit einem zufällig erzeugten Passwort.
 
 ```
 Director {
@@ -78,19 +79,65 @@ Director {
 }
 ```
 
+`Name` muss der Name des Directors sein (steht dort in `bareos-dir.d/director/*.conf`). Das
+Passwort aus dieser Datei kommt in den Client-Eintrag des Directors; es gehört nicht in Tickets
+oder Chats.
+
 Auf dem Director der passende Client (`/etc/bareos/bareos-dir.d/client/forgeiec-fd.conf`):
 
 ```
 Client {
   Name = forgeiec-fd
   Address = forgeiec.io
-  Password = "<Passwort des Clients>"
+  Password = "<Passwort aus bareos-fd.d/director/bareos-dir.conf>"
+  Passive = yes          # Director im Heimnetz: alle Verbindungen gehen von dort aus
 }
 ```
 
-Port 9102 muss vom Director aus erreichbar sein. Für Sicherungen über fremde Netze empfiehlt sich
-TLS (bei Bareos Standard) und die Verschlüsselung auf dem Client (PKI-Schlüssel im File Daemon),
-weil die Dumps vertrauliche Daten enthalten.
+#### Director im Heimnetz: `Passive = yes`
+
+Ohne `Passive` baut der File Daemon auf dem Server selbst eine Verbindung zum Storage Daemon auf
+(Port 9103). Steht der Storage Daemon im Heimnetz hinter einem Router, kommt diese Verbindung
+nicht an und der Job wartet, bis er abbricht. Mit `Passive = yes` verbinden sich Director **und**
+Storage Daemon zum File Daemon; der Server muss das Heimnetz nie erreichen.
+
+```mermaid
+flowchart LR
+    subgraph H["Heimnetz"]
+        D["bareos-dir"]
+        S["bareos-sd"]
+    end
+    subgraph V["Server forgeiec.io"]
+        F["bareos-fd :9102"]
+    end
+    D -->|"Steuerung"| F
+    S -->|"Daten (Passive = yes)"| F
+```
+
+Nötig ist dann nur: Port 9102 auf dem Server ist vom Anschluss des Heimnetzes aus erreichbar
+(Firewall des Servers, am besten nur für dessen Adresse). Im Heimnetz wird kein Port freigegeben.
+
+#### Verschlüsselung
+
+Bareos verschlüsselt jede Verbindung ab Werk mit **TLS-PSK** (TLS 1.3, AES-256): Schlüssel ist
+das Passwort des jeweiligen Eintrags, beide Seiten weisen sich damit gegenseitig aus. Eine
+CA oder Zertifikate braucht es dafür nicht.
+
+X.509-Zertifikate (auch von Let's Encrypt) lassen sich in Bareos eintragen (`TLS Certificate`,
+`TLS Key`, `TLS Verify Peer`), werden aber zwischen Bareos-Diensten **nicht** benutzt, solange
+beide Seiten das Passwort kennen: Bareos bevorzugt dann immer TLS-PSK. Getestet mit Bareos 25.1.2
+(Director, Storage und File Daemon mit Zertifikat und `TLS Require`, `TLS Verify Peer = yes`):
+alle Verbindungen liefen über PSK, ein falscher `TLS Allowed CN` blieb ohne Wirkung. Zertifikate
+von Let's Encrypt eignen sich außerdem nicht als Client-Zertifikate; sie enthalten seit 2026 nur
+noch „TLS Web Server Authentication“.
+
+Darum gilt für die Tapir-Sicherung:
+
+- lange, zufällige Passwörter (die Pakete erzeugen sie so) und `TLS Require = yes` in den
+  Einträgen, damit nie unverschlüsselt übertragen wird;
+- für vertrauliche Daten auf fremdem Speicher zusätzlich die Verschlüsselung auf dem Client
+  (`PKI Signatures`, `PKI Encryption`, eigener Schlüssel im File Daemon): dann liegen die Dumps
+  auch auf den Volumes nur verschlüsselt.
 
 ### 2. Einstellungen
 
