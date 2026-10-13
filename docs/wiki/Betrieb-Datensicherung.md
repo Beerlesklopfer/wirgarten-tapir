@@ -175,9 +175,15 @@ sudo tapir-instance bareos ackervielfalt                                       #
 
 Die Datei beginnt mit einer **Anleitung in Kommentaren**: was im File Daemon auf dem Server für
 den Director stehen muss (mit Prüfung, ob die Datei da ist), wohin die Datei auf dem Director
-gehört, welche Rechte sie braucht und wie man testet. Jeder Teil beginnt mit seiner Zieldatei,
-z. B. `# File: /etc/bareos/bareos-dir.d/client/forgeiec-fd.conf` und
-`# File: /etc/bareos/bareos-dir.d/job/tapir-ackervielfalt.conf` (FileSet und Job zusammen). Man
+gehört, welche Rechte sie braucht und wie man testet. Jeder Teil beginnt mit dem Daemon, der ihn
+liest, und seiner Zieldatei:
+
+| Kopfzeile | wohin |
+|---|---|
+| `# [bareos-fd]  File: /etc/bareos/bareos-fd.d/director/bareos-dir.conf` | auf dem Tapir-Server; nur als Kommentar gezeigt, das Paket hat die Datei angelegt (mit Prüfung „found“/„NOT FOUND“) |
+| `# [bareos-dir]  File: /etc/bareos/bareos-dir.d/client/forgeiec-fd.conf` | auf dem Director-Rechner: der Client |
+| `# [bareos-dir]  File: /etc/bareos/bareos-dir.d/job/tapir-ackervielfalt.conf` | auf dem Director-Rechner: FileSet und Job einer Instanz |
+ Man
 kann die Teile so verteilen oder die ganze Datei in eine einzige `*.conf` legen; Bareos überliest
 die Kommentare.
 
@@ -526,7 +532,7 @@ gRPC gibt es nur über TLS. Einträge im Director (`bareos-dir.d/director/*.conf
 
 | Direktive | Vorgabe | Bedeutung |
 |---|---|---|
-| `Grpc Port` | `DirPort` + 1000 | Port des gRPC-Zugangs |
+| `Grpc Port` | `DirPort` + 1000, also `0.0.0.0:10101` bei `DirPort = 9101` | Port des gRPC-Zugangs, lauscht auf allen Adressen: in der Firewall nur fürs Intranet öffnen |
 | `Grpc Tls Certificate`, `Grpc Tls Key` | – | eigenes Zertifikat; ohne sie erzeugt der Director beim ersten Start ein selbst signiertes im Arbeitsverzeichnis |
 | `Mdns Advertise` | an | kündigt sich als `_onesimus-dir._tcp` an, mit gRPC-Port und Zertifikats-Fingerprint im TXT-Eintrag |
 | `Working Directory` | – | dort liegt das selbst erzeugte Zertifikat |
