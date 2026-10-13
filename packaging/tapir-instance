@@ -18,7 +18,7 @@
 #   tapir-instance remove <name> [--purge]                              --purge also drops database and data
 #   tapir-instance backup <name>|--shared                               dump database and Keycloak realm to /var/backups/tapir/<name>
 #   tapir-instance restore <name> [--from <dir>] [--no-realm] [--yes]   put a backup back (after Bareos restored the files)
-#   tapir-instance bareos <name>|--shared|--all [--write <bareos-dir.d>]  Bareos FileSet and Job, one per instance
+#   tapir-instance bareos <name>|--shared|--all [--write <bareos-dir.d>]  Bareos Client, FileSets and Jobs (one per instance)
 #
 # Every instance gets: /etc/tapir/instances/<name>.env, data in /var/lib/tapir/<name>, the systemd units
 # tapir-<name>-{web,worker,beat} (target tapir-<name>.target), a PostgreSQL database on this machine,
@@ -1018,6 +1018,44 @@ cmd_restore() {  # name [--from <dir>] [--no-realm] [--yes]
 bareos_setting() {  # key default
     local value; value="$(env_value "$BAREOS_ENV" "$1")"; echo "${value:-$2}"
 }
+# Password of the director in the configuration of the file daemon on this machine (the package
+# bareos-filedaemon generates it); the director needs the same one in its Client resource
+bareos_fd_password() {  # director
+    local fd_dir file
+    fd_dir="$(bareos_setting BAREOS_FD_CONFIG /etc/bareos/bareos-fd.d)/director"
+    for file in "$fd_dir"/*.conf; do
+        [ -r "$file" ] || continue
+        grep -qiE "^[[:space:]]*Name[[:space:]]*=[[:space:]]*\"?$1\"?[[:space:]]*(#.*)?$" "$file" || continue
+        sed -nE 's/^[[:space:]]*Password[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/ip' "$file" | head -n 1
+        return 0
+    done
+}
+# Client resource of this machine for the director: passive by default, so the director and the
+# storage daemon connect to the file daemon and the server never has to reach the director's network
+bareos_client() {
+    local client director address passive password
+    client="$(bareos_setting BAREOS_CLIENT "$(hostname -s)-fd")"
+    director="$(bareos_setting BAREOS_DIRECTOR bareos-dir)"
+    address="$(bareos_setting BAREOS_CLIENT_ADDRESS "$(hostname -f)")"
+    passive="$(bareos_setting BAREOS_PASSIVE yes)"
+    password="$(bareos_fd_password "$director")"
+    case "$password" in
+        "") warn "no password for the director $director in $(bareos_setting BAREOS_FD_CONFIG /etc/bareos/bareos-fd.d)/director - install bareos-filedaemon or set BAREOS_DIRECTOR"
+            password="<password of $director in bareos-fd.d/director on $address>" ;;
+        "[md5]"*) warn "the file daemon keeps only an MD5 hash of the password of $director - put the clear text password into the Client resource yourself"
+            password="<clear text password of $director>" ;;
+    esac
+    cat <<EOF
+# Written by tapir-instance bareos - Client $client ($address), contains the password of the file daemon
+Client {
+  Name = "$client"
+  Description = "Tapir server $address"
+  Address = "$address"
+  Password = "$password"
+  Passive = $passive
+}
+EOF
+}
 bareos_job() {  # name | --shared
     local target="$1" client jobdefs schedule pool storage job title files exclude
     client="$(bareos_setting BAREOS_CLIENT "$(hostname -s)-fd")"
@@ -1083,6 +1121,24 @@ bareos_write() {  # dir name|--shared [--remove]
         return 0
     fi
     install -d "$dir/job" "$dir/fileset"
+    if [ "$target" = --shared ]; then
+        local client file own=true
+        client="$(bareos_setting BAREOS_CLIENT "$(hostname -s)-fd")"
+        # Never replace a Client resource of that name the director already has from elsewhere
+        for file in "$dir"/client/*.conf; do
+            [ -e "$file" ] && [ "$file" != "$dir/client/$client.conf" ] \
+                && grep -qiE "^[[:space:]]*Name[[:space:]]*=[[:space:]]*\"?$client\"?[[:space:]]*$" "$file" && own=false
+        done
+        [ -e "$dir/client/$client.conf" ] && ! grep -qs '^# Written by tapir-instance' "$dir/client/$client.conf" && own=false
+        if [ "$own" = true ]; then
+            install -d "$dir/client"
+            ( umask 027; bareos_client > "$dir/client/$client.conf" )
+            chgrp bareos "$dir/client/$client.conf" 2>/dev/null || true
+            log "Bareos client $client in $dir"
+        else
+            log "Bareos client $client exists in $dir - kept"
+        fi
+    fi
     local resources; resources="$(bareos_job "$target" | grep -v '^$')"
     printf '%s\n' "$resources" | awk '/^Job \{/ { exit } { print }' > "$dir/fileset/$job.conf"
     printf '%s\n' "$resources" | awk 'NR == 1 { print } /^Job \{/ { job = 1 } job { print }' > "$dir/job/$job.conf"
@@ -1105,7 +1161,8 @@ bareos_sync() {  # name [--remove]
     [ -n "$dir" ] || return 0
     [ -d "$dir" ] || { warn "BAREOS_CONFIG_DIR $dir does not exist - no Bareos job for $1"; return 0; }
     bareos_write "$dir" "$1" ${2:-}
-    [ -e "$dir/job/tapir-shared.conf" ] || bareos_write "$dir" --shared
+    [ -e "$dir/job/tapir-shared.conf" ] && [ -e "$dir/client/$(bareos_setting BAREOS_CLIENT "$(hostname -s)-fd").conf" ] \
+        || bareos_write "$dir" --shared
     bareos_reload
 }
 
@@ -1121,7 +1178,11 @@ cmd_bareos() {  # name|--shared|--all [--write <dir>]
     done
     [ ${#targets[@]} -gt 0 ] || die "usage: tapir-instance bareos <name>|--shared|--all [--write <bareos-dir.d>]"
     for target in "${targets[@]}"; do
-        if [ -n "$dir" ]; then bareos_write "$dir" "$target"; else bareos_job "$target" | grep -v '^$'; echo; fi
+        if [ -n "$dir" ]; then bareos_write "$dir" "$target"
+        else
+            [ "$target" = --shared ] && { bareos_client; echo; }
+            bareos_job "$target" | grep -v '^$'; echo
+        fi
     done
     [ -z "$dir" ] || bareos_reload
 }

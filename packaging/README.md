@@ -118,7 +118,7 @@ Keycloak realm with users and password hashes go to `/var/backups/tapir/<name>/`
 
 ```sh
 sudo cp /usr/share/tapir/bareos.env.example /etc/tapir/bareos.env   # BAREOS_CLIENT, JobDefs, ...
-sudo tapir-instance bareos --all                                   # FileSets and Jobs for the director
+sudo tapir-instance bareos --all                                   # Client, FileSets and Jobs for the director
 sudo tapir-instance bareos --all --write /etc/bareos/bareos-dir.d  # director on this machine
 sudo tapir-instance restore ackervielfalt                          # after Bareos restored the files
 ```

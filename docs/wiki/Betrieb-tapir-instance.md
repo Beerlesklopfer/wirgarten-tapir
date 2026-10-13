@@ -30,7 +30,7 @@ Keycloak: [Betrieb-Keycloak](Betrieb-Keycloak) · Fehler: [Betrieb-Fehlersuche](
 | [`remove <name> [--purge]`](#remove) | Instanz entfernen, mit `--purge` samt Daten |
 | [`backup <name>\|--shared`](#backup) | Datenbank und Realm nach `/var/backups/tapir/<name>` (Bareos ruft das vor jedem Job) |
 | [`restore <name> [--from <dir>] [--no-realm] [--yes]`](#restore) | Sicherung zurückspielen |
-| [`bareos <name>\|--shared\|--all [--write <dir>]`](#bareos) | Bareos-FileSet und -Job, einer je Instanz |
+| [`bareos <name>\|--shared\|--all [--write <dir>]`](#bareos) | Bareos-Client, -FileSets und -Jobs, einer je Instanz |
 | `--help` | Kurzhilfe |
 
 **Namen** von Instanzen und Realms: 2 bis 31 Zeichen, Kleinbuchstaben, Ziffern und `-`, beginnend
@@ -475,10 +475,12 @@ tapir-instance bareos --all                               # alle Instanzen und t
 tapir-instance bareos --all --write /etc/bareos/bareos-dir.d
 ```
 
-Erzeugt je Instanz ein FileSet und einen Job `tapir-<name>`, der vor dem Lesen
+Erzeugt mit `--shared`/`--all` den Client dieses Servers (Passwort aus
+`/etc/bareos/bareos-fd.d/director/`, standardmäßig `Passive = yes`) und je Instanz ein FileSet und
+einen Job `tapir-<name>`, der vor dem Lesen
 `tapir-instance backup <name>` auf dem Client ausführt. Einstellungen aus `/etc/tapir/bareos.env`
 (Client, JobDefs, Zeitplan, Pool, Storage). `--write` legt `job/tapir-<name>.conf` und
-`fileset/tapir-<name>.conf` in einem `bareos-dir.d` ab und lädt den Director neu. Mit
+`fileset/tapir-<name>.conf` (und `client/<client>.conf`) in einem `bareos-dir.d` ab und lädt den Director neu. Mit
 `BAREOS_CONFIG_DIR` tun `create` und `adopt` das von selbst, `remove` löscht die Dateien.
 Ausführlich: [Datensicherung mit Bareos](Betrieb-Datensicherung).
 

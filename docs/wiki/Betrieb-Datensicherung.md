@@ -7,8 +7,8 @@
 > Rollen und Clients. Bareos sichert dann dieses Verzeichnis, die env-Datei, `/var/lib/tapir/<name>`
 > und die nginx-Site. Einmal je Server sichert der Job `tapir-shared` die gemeinsamen Teile:
 > die ganze Keycloak-Datenbank, `/etc/tapir` und die lizenzierten Schriften.
-> `tapir-instance bareos` erzeugt die Director-Konfiguration (Bareos, auch
-> [baReos-dird](https://github.com/Beerlesklopfer/baReos-dird)); den Überblick über Pools, Jobs und Clients gibt
+> `tapir-instance bareos` erzeugt die Director-Konfiguration (Bareos, künftig auch
+> onesimus-dird); den Überblick über Pools, Jobs und Clients gibt
 > [Onesimus](https://github.com/Beerlesklopfer/Onesimus). Läuft der Director auf demselben
 > Rechner, legen `create`, `adopt` und `remove` die Jobs selbst an und entfernen sie wieder.
 > `tapir-instance restore <name>` spielt eine Sicherung zurück: eine Instanz allein, ohne die
@@ -85,7 +85,8 @@ Director {
 Passwort aus dieser Datei kommt in den Client-Eintrag des Directors; es gehört nicht in Tickets
 oder Chats.
 
-Auf dem Director der passende Client (`/etc/bareos/bareos-dir.d/client/forgeiec-fd.conf`):
+Auf dem Director der passende Client (`/etc/bareos/bareos-dir.d/client/forgeiec-fd.conf`). Ihn
+erzeugt `tapir-instance bareos --all` mit, samt Passwort aus der Datei oben (Schritt 3):
 
 ```
 Client {
@@ -151,6 +152,10 @@ sudo editor /etc/tapir/bareos.env
 | Variable | Vorgabe | Bedeutung |
 |---|---|---|
 | `BAREOS_CLIENT` | `<kurzer Hostname>-fd` | Name des Clients im Director |
+| `BAREOS_CLIENT_ADDRESS` | `hostname -f` | Adresse, unter der der Director den Server erreicht, z. B. `forgeiec.io` |
+| `BAREOS_DIRECTOR` | `bareos-dir` | Name des Directors in `bareos-fd.d/director/`; dessen Passwort kommt in den Client |
+| `BAREOS_PASSIVE` | `yes` | passiver Client (Director im Heimnetz), `no` für einen Director, den der Server erreichen kann |
+| `BAREOS_FD_CONFIG` | `/etc/bareos/bareos-fd.d` | Konfiguration des File Daemon auf dem Server |
 | `BAREOS_JOBDEFS` | `DefaultJob` | JobDefs mit Zeitplan, Pools, Storage und Messages |
 | `BAREOS_SCHEDULE` | – (aus JobDefs) | eigener Zeitplan, z. B. `WeeklyCycle` |
 | `BAREOS_POOL` | – (aus JobDefs) | eigener Pool |
@@ -164,12 +169,14 @@ sudo editor /etc/tapir/bareos.env
 **Director auf einem anderen Rechner:** die Konfiguration erzeugen und dorthin kopieren.
 
 ```sh
-sudo tapir-instance bareos --all > tapir-bareos.conf     # alle Instanzen und tapir-shared
-sudo tapir-instance bareos ackervielfalt                 # nur eine Instanz
+sudo sh -c 'umask 077; tapir-instance bareos --all > /root/tapir-bareos.conf'   # Client, tapir-shared, alle Instanzen
+sudo tapir-instance bareos ackervielfalt                                       # nur FileSet und Job einer Instanz
 ```
 
-Auf dem Director den Inhalt in `bareos-dir.d/fileset/` und `bareos-dir.d/job/` ablegen (oder als
-eine Datei z. B. `bareos-dir.d/job/tapir-forgeiec.conf`), prüfen und neu laden:
+`--all` (und `--shared`) enthält den **Client** mit dem Passwort des File Daemon, die Datei deshalb
+nur für root lesbar ablegen und nach dem Kopieren löschen. Auf dem Director als eine Datei
+ablegen, z. B. `bareos-dir.d/job/tapir-forgeiec.conf` (Bareos liest jede `*.conf` unter
+`bareos-dir.d/*/`), prüfen und neu laden:
 
 ```sh
 sudo -u bareos bareos-dir -t && echo reload | sudo bconsole
@@ -180,6 +187,10 @@ sudo -u bareos bareos-dir -t && echo reload | sudo bconsole
 ```sh
 sudo tapir-instance bareos --all --write /etc/bareos/bareos-dir.d
 ```
+
+`--write` legt `client/<client>.conf`, `fileset/tapir-*.conf` und `job/tapir-*.conf` an (Rechte
+`0640`, Gruppe `bareos`). Einen Client gleichen Namens, den der Director schon aus einer anderen
+Datei kennt (z. B. `bareos-fd` aus dem Paket), lässt es stehen.
 
 Mit `BAREOS_CONFIG_DIR=/etc/bareos/bareos-dir.d` in `bareos.env` geschieht das danach von selbst:
 `create` und `adopt` legen `tapir-<name>` an (und einmalig `tapir-shared`), `remove` löscht den
@@ -204,7 +215,21 @@ sudo ls -l /var/backups/tapir/ackervielfalt/
 
 ## Erzeugte Konfiguration
 
-Beispiel für die Instanz `ackervielfalt` mit `BAREOS_CLIENT=forgeiec-fd`:
+Client (Teil von `--shared` und `--all`) mit `BAREOS_CLIENT=forgeiec-fd` und
+`BAREOS_CLIENT_ADDRESS=forgeiec.io`:
+
+```
+# Written by tapir-instance bareos - Client forgeiec-fd (forgeiec.io), contains the password of the file daemon
+Client {
+  Name = "forgeiec-fd"
+  Description = "Tapir server forgeiec.io"
+  Address = "forgeiec.io"
+  Password = "<aus /etc/bareos/bareos-fd.d/director/bareos-dir.conf>"
+  Passive = yes
+}
+```
+
+FileSet und Job der Instanz `ackervielfalt`:
 
 ```
 # Written by tapir-instance bareos - Tapir ackervielfalt (https://ackervielfalt.forgeiec.io): database, Keycloak realm, files
@@ -336,10 +361,185 @@ sudo systemctl start tapir-keycloak
 | Projekt | Was es ist | Nutzen für die Tapir-Sicherung |
 |---|---|---|
 | [Onesimus](https://github.com/Beerlesklopfer/Onesimus) ([onesimus.io](https://onesimus.io)) | Qt-Desktop-Oberfläche für Bareos und Bacula; spricht den Director über die bconsole-Schnittstelle an, nie direkt die Datenbank (GPL-3.0, Alpha) | Belegung der Pools, Wachstum und Prognosen, Verbrauch je Job und Client (also je Tapir-Instanz), wiederverwendbare Volumes – vom Arbeitsplatz aus, ohne Web-Oberfläche auf dem Backup-Server |
-| [baReos-dird](https://github.com/Beerlesklopfer/baReos-dird) (`onesimusd`, nicht öffentlich) | Director-Nachbau in Rust, als Ersatz für `bareos-dir`; liest dasselbe Verzeichnis `bareos-dir.d`, arbeitet mit den C++-Daemons (File und Storage Daemon) und TLS-PSK | Die von `tapir-instance bareos` erzeugten FileSets und Jobs sind gewöhnliche Bareos-Konfiguration; mit `onesimusd` sind sie noch nicht getestet (vor allem `RunScript` vor dem Job) |
+| **onesimus-dird** (in Arbeit, heute [baReos-dird](https://github.com/Beerlesklopfer/baReos-dird), nicht öffentlich) | Director nativ in Rust, entsteht als Fork von Bareos und ersetzt `bareos-dir`; spricht das Bareos-Protokoll mit den C++-Daemons (File und Storage Daemon, TLS-PSK) und als neues Protokoll **gRPC**; liest dasselbe Verzeichnis `bareos-dir.d` | Die von `tapir-instance bareos` erzeugten FileSets und Jobs sind gewöhnliche Bareos-Konfiguration; mit dem neuen Director sind sie noch nicht getestet (vor allem `RunScript` vor dem Job) |
 
 Beide Projekte sind in Entwicklung (Onesimus: Alpha). Für die Sicherung der Solawi-Daten ist der
-Director von Bareos selbst der getestete Weg; baReos-dird ist nur mit Zugang zum Repository sichtbar.
+Director von Bareos selbst der getestete Weg. onesimus-dird ist noch nicht veröffentlicht; das Repository baReos-dird ist nur mit Zugang sichtbar.
+
+### Option: X.509 mit onesimus-dird (geplant)
+
+> **Abstract:** Der Transport ist bei Bareos immer verschlüsselt (TLS-PSK). onesimus-dird soll
+> zusätzlich eine Anmeldung mit **X.509-Zertifikaten** anbieten. Der Director weist sich auf
+> seinem gRPC-Zugang mit dem Let's-Encrypt-Zertifikat aus, das auf dem Tapir-Server ohnehin
+> entsteht und dort auch den Intranet-Namen des Director-Rechners enthält. Ein Bareos-Job sichert
+> Zertifikat und Schlüssel auf dem Server und spielt sie alle n Wochen auf dem Director-Rechner
+> zurück; so bleibt das Zertifikat dort aktuell. Konsolen und die Oberfläche Onesimus melden sich
+> später mit Zertifikaten aus einer eigenen CA an.
+> Stand: Die Bareos-Jobs dafür sind getestet; gRPC mit eigenem Zertifikat gibt es in onesimus-dird,
+> die Anmeldung per Client-Zertifikat ist noch nicht gebaut. onesimus-dird wird gerade weiter gebaut
+> und verändert: Direktiven, Vorgaben und Abläufe unten können sich noch ändern.
+
+```mermaid
+flowchart LR
+    subgraph V["Server forgeiec.io"]
+        C["certbot: Zertifikat bareos<br>forgeiec.io + Intranet-Name"]
+        H["deploy-Hook: Kopie nach<br>/var/backups/tapir/_tls"]
+        F["bareos-fd"]
+        C --> H --> F
+    end
+    subgraph I["Intranet"]
+        R["Job tapir-tls-restore<br>alle n Wochen"]
+        D["onesimus-dird<br>Grpc Tls Certificate"]
+        K["Onesimus, Konsolen"]
+    end
+    F -->|"Job tapir-tls"| R
+    R --> D
+    K -->|"gRPC über TLS"| D
+```
+
+**Zwei Zertifikatsquellen:** Let's Encrypt stellt nur noch Server-Zertifikate aus („TLS Web
+Server Authentication“, am Zertifikat von forgeiec.io nachgesehen). Für den Director passt das.
+Für die Anmeldung von Konsolen braucht es Client-Zertifikate mit „TLS Web Client
+Authentication“; sie kommen aus einer eigenen kleinen CA (z. B. step-ca oder openssl), und
+onesimus-dird bildet CN oder SAN des Zertifikats auf den Namen der Console ab.
+
+#### 1. Zertifikat auf dem Server, mit Intranet-Namen
+
+Ein eigenes Zertifikat `bareos`, damit die Website-Zertifikate unberührt bleiben. Beispiel für den
+Director-Rechner `ws-joerg.intranet.bernau.family`. Let's Encrypt prüft jeden Namen von außen,
+der Intranet-Name steht aber nur im internen DNS:
+
+| Weg | Was zu tun ist | Folge |
+|---|---|---|
+| **HTTP-01** (einfach) | in der öffentlichen Zone `bernau.family` einen A-Eintrag `ws-joerg.intranet` auf die Adresse von forgeiec.io; der interne DNS beantwortet den Namen im Heimnetz weiter mit der internen Adresse (Split-DNS) | der Hostname ist öffentlich sichtbar; nginx auf dem Server muss für diesen Namen `/.well-known/acme-challenge/` aus `/var/www/html` ausliefern (Standard-Site) |
+| **DNS-01** | certbot setzt den TXT-Eintrag `_acme-challenge.ws-joerg.intranet.bernau.family` über die API des DNS-Anbieters | außer dem TXT-Eintrag nichts Öffentliches; braucht ein certbot-Plugin für den Anbieter der Zone `bernau.family` |
+
+```sh
+sudo certbot certonly --cert-name bareos --webroot -w /var/www/html \
+    -d forgeiec.io -d ws-joerg.intranet.bernau.family
+```
+
+Nach jeder Erneuerung legt ein Hook Zertifikat und Schlüssel als echte Dateien (keine Links) dort
+ab, wo die Sicherung sie mitnimmt. Datei `/etc/letsencrypt/renewal-hooks/deploy/bareos-tls`
+(Rechte `0755`):
+
+```sh
+#!/bin/sh
+# Copies the certificate "bareos" for the Bareos job tapir-tls
+[ "$(basename "$RENEWED_LINEAGE")" = bareos ] || exit 0
+install -d -m 0700 /var/backups/tapir/_tls
+install -m 0644 "$RENEWED_LINEAGE/fullchain.pem" /var/backups/tapir/_tls/fullchain.pem
+install -m 0600 "$RENEWED_LINEAGE/privkey.pem" /var/backups/tapir/_tls/privkey.pem
+```
+
+Einmal sofort ausführen:
+`sudo RENEWED_LINEAGE=/etc/letsencrypt/live/bareos /etc/letsencrypt/renewal-hooks/deploy/bareos-tls`.
+
+#### 2. Jobs: sichern und alle n Wochen zurückspielen
+
+Auf dem Director. `tapir-tls` sichert das Verzeichnis; `tapir-tls-restore` spielt den zuletzt
+gesicherten Stand über dessen Bootstrap-Datei auf dem Director-Rechner zurück (Client `bareos-fd`
+ist dort der File Daemon) und legt die Dateien nach `/etc/onesimus/tls`.
+
+```
+FileSet {
+  Name = "tapir-tls"
+  Include {
+    Options { Signature = XXH128 }
+    File = "/var/backups/tapir/_tls"
+  }
+}
+Schedule {
+  Name = "tapir-tls"
+  Run = Full w00/w02 mon at 04:00       # jede zweite Woche
+}
+Schedule {
+  Name = "tapir-tls-restore"
+  Run = w00/w02 mon at 04:30
+}
+Job {
+  Name = "tapir-tls"
+  JobDefs = "DefaultJob"
+  Client = "forgeiec-fd"
+  FileSet = "tapir-tls"
+  Schedule = "tapir-tls"
+  Level = Full
+  Write Bootstrap = "/var/lib/bareos/tapir-tls.bsr"
+}
+Job {
+  Name = "tapir-tls-restore"
+  Type = Restore
+  Client = "bareos-fd"                  # File Daemon auf dem Director-Rechner
+  FileSet = "tapir-tls"
+  Storage = File
+  Pool = Full
+  Messages = Standard
+  Schedule = "tapir-tls-restore"
+  Bootstrap = "/var/lib/bareos/tapir-tls.bsr"
+  Regex Where = "!/var/backups/tapir/_tls!/etc/onesimus/tls!"
+  Replace = Always
+  RunScript {
+    RunsWhen = After
+    RunsOnClient = yes
+    Command = "/usr/local/sbin/onesimus-tls-installed"
+  }
+}
+```
+
+Das Skript danach, `/usr/local/sbin/onesimus-tls-installed` (Rechte `0755`), setzt die Rechte,
+prüft das Zertifikat und startet den Director verzögert neu. Er liest Zertifikat und Schlüssel
+nur beim Start, und ein sofortiger Neustart würde den laufenden Job abbrechen:
+
+```sh
+#!/bin/sh
+set -e
+dir=/etc/onesimus/tls
+chown root:bareos "$dir/fullchain.pem" "$dir/privkey.pem"
+chmod 0644 "$dir/fullchain.pem"
+chmod 0640 "$dir/privkey.pem"
+openssl x509 -in "$dir/fullchain.pem" -noout -checkend 604800   # mindestens 7 Tage gültig
+systemd-run --on-active=5min --unit=onesimus-tls-restart systemctl restart onesimus-dird
+```
+
+**Wie groß darf n sein?** Let's-Encrypt-Zertifikate gelten 90 Tage, certbot erneuert 30 Tage vor
+Ablauf. Damit das neue Zertifikat ankommt, bevor das alte abläuft: n ≤ 4 Wochen; `w00/w02`
+(alle zwei Wochen) lässt Luft für einen ausgefallenen Lauf. Die angekündigten kürzeren Laufzeiten
+bei Let's Encrypt verlangen später ein kleineres n.
+
+Getestet mit Bareos 25.1.2: Sicherung mit `Write Bootstrap`, zeitgesteuerter Restore-Job mit
+`Bootstrap`, `Regex Where` und `RunScript` danach; der Schlüssel kam unverändert an. Der Schlüssel
+liegt danach auf zwei Rechnern und in den Bareos-Volumes: Volumes verschlüsseln (PKI im File
+Daemon) und den Pool kurz aufbewahren.
+
+#### 3. onesimus-dird
+
+gRPC gibt es nur über TLS. Einträge im Director (`bareos-dir.d/director/*.conf`), Stand 13.10.2026
+(in Entwicklung, maßgeblich ist die Dokumentation von onesimus-dird):
+
+| Direktive | Vorgabe | Bedeutung |
+|---|---|---|
+| `Grpc Port` | `DirPort` + 1000 | Port des gRPC-Zugangs |
+| `Grpc Tls Certificate`, `Grpc Tls Key` | – | eigenes Zertifikat; ohne sie erzeugt der Director beim ersten Start ein selbst signiertes im Arbeitsverzeichnis |
+| `Mdns Advertise` | an | kündigt sich als `_onesimus-dir._tcp` an, mit gRPC-Port und Zertifikats-Fingerprint im TXT-Eintrag |
+| `Working Directory` | – | dort liegt das selbst erzeugte Zertifikat |
+
+```
+Director {
+  ...
+  Grpc Tls Certificate = /etc/onesimus/tls/fullchain.pem
+  Grpc Tls Key = /etc/onesimus/tls/privkey.pem
+}
+```
+
+| | selbst signiert (Standard) | Let's Encrypt |
+|---|---|---|
+| Prüfung durch Onesimus | Fingerprint, beim ersten Verbinden gemerkt (auch per mDNS bekannt) | öffentliche CA und Name des Directors |
+| nach Erneuerung | Fingerprint bleibt über Neustarts gleich | Fingerprint ändert sich alle 60 Tage, Festhalten ist dann nicht sinnvoll |
+| Name im Intranet | beliebig | muss im Zertifikat stehen (Abschnitt 1) |
+
+Anmeldung heute: Name und Passwort der Console wie über das Bareos-Protokoll, das Passwort selbst
+wird nie übertragen; danach braucht jeder Aufruf das Session-Token. Geplant: Anmeldung per
+Client-Zertifikat (gRPC mit mTLS) aus der eigenen CA, Zuordnung CN/SAN → Console.
 
 ## Hinweise
 
