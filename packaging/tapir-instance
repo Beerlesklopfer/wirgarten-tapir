@@ -16,13 +16,17 @@
 #   tapir-instance theme <name> <theme>                                 theme of Tapir and of the Keycloak login pages and mails
 #   tapir-instance param <name> [--all | <key> [<value>]]             show/set Tapir parameters, also those locked in the web UI
 #   tapir-instance remove <name> [--purge]                              --purge also drops database and data
+#   tapir-instance backup <name>|--shared                               dump database and Keycloak realm to /var/backups/tapir/<name>
+#   tapir-instance restore <name> [--from <dir>] [--no-realm] [--yes]   put a backup back (after Bareos restored the files)
+#   tapir-instance bareos <name>|--shared|--all [--write <bareos-dir.d>]  Bareos FileSet and Job, one per instance
 #
 # Every instance gets: /etc/tapir/instances/<name>.env, data in /var/lib/tapir/<name>, the systemd units
 # tapir-<name>-{web,worker,beat} (target tapir-<name>.target), a PostgreSQL database on this machine,
 # a database number in the shared redis (container tapir-redis), a realm in the shared Keycloak
 # (container tapir-keycloak, see tapir-kcadm) and the nginx site
 # /etc/nginx/sites-available/tapir-<name> (enabling it is left to you; an already enabled site of the
-# domain gets the Keycloak login paths added).
+# domain gets the Keycloak login paths added). With BAREOS_CONFIG_DIR in /etc/tapir/bareos.env
+# every instance also gets its own Bareos job (see: tapir-instance bareos).
 set -euo pipefail
 
 # --- paths and commands, overridable for tests --------------------------------------------------
@@ -49,6 +53,12 @@ REDIS_PORT="${REDIS_PORT:-6380}"
 REDIS_IMAGE="${REDIS_IMAGE:-docker.io/library/redis:7.4-alpine}"
 REDIS_DATABASES=64
 NGINX_SNIPPET="$NGINX_DIR/snippets/tapir-keycloak.conf"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/tapir}"
+BAREOS_ENV="${BAREOS_ENV:-$TAPIR_ETC/bareos.env}"
+PG_DUMP="${PG_DUMP:-pg_dump}"
+PG_RESTORE="${PG_RESTORE:-pg_restore}"
+PG_DUMP_ADMIN="${PG_DUMP_ADMIN:-runuser -u postgres -- pg_dump}"
+PG_RESTORE_ADMIN="${PG_RESTORE_ADMIN:-runuser -u postgres -- pg_restore}"
 
 # Rewrites an nginx site (read twice): in every server block that listens on 443 - wherever the
 # listen line is, certbot appends it at the end - drop own /realms/ and /resources/ locations,
@@ -656,6 +666,7 @@ cmd_create() {
     start_instance "$name"
     [ -n "$admin_email" ] && add_user "$name" "$admin_email" true
     [ "$nginx" = true ] && write_nginx "$name"
+    bareos_sync "$name"
     log "Checks"
     if check_instance "$name"; then log "Done: https://$domain"; else die "some checks failed"; fi
 }
@@ -738,6 +749,7 @@ cmd_adopt() {
     start_instance "$name"
     [ -n "$admin_email" ] && add_user "$name" "$admin_email" true
     write_nginx "$name"
+    bareos_sync "$name"
     log "Checks"
     if check_instance "$name"; then log "Done: https://$domain"; else die "some checks failed"; fi
 }
@@ -842,6 +854,278 @@ print(f'{key}: {old} -> {param.value}')
 "
 }
 
+# --- backup and restore (Bareos) ----------------------------------------------------------------
+# Every instance has its own backup: the database dump, the export of its Keycloak realm (users with
+# password hashes, clients, roles) and its files. "backup" writes the dumps to $BACKUP_DIR/<name>,
+# a Bareos job per instance (see "bareos") runs it before saving that directory and the files.
+
+# Splits a postgresql:// URL into the libpq variables, so the password never shows up in ps.
+# They are not exported: the admin commands (runuser -u postgres) must not inherit them.
+pg_vars() {  # url
+    local rest="${1#*://}" auth hostpart
+    auth="${rest%%@*}"; hostpart="${rest#*@}"
+    PGUSER="${auth%%:*}"
+    PGPASSWORD="$(printf '%b' "$(printf '%s' "${auth#*:}" | sed 's/%\([0-9A-Fa-f][0-9A-Fa-f]\)/\\x\1/g')")"
+    PGDATABASE="${hostpart#*/}"; PGDATABASE="${PGDATABASE%%\?*}"
+    hostpart="${hostpart%%/*}"; PGHOST="${hostpart%%:*}"; PGPORT="${hostpart#*:}"
+    [ "$PGPORT" = "$hostpart" ] && PGPORT=5432
+    return 0
+}
+# The realm lives in the shared Keycloak container (and not in an external Keycloak kept by adopt)
+uses_shared_keycloak() {  # name
+    [ -r "$KC_ENV" ] && [ "$(env_value "$(instance_env "$1")" KEYCLOAK_ADMIN_SERVER_URL)" \
+        = "http://127.0.0.1:$(env_value "$KC_ENV" KC_HTTP_PORT)" ]
+}
+
+cmd_backup() {  # name | --shared
+    local target="${1:-}" dir
+    umask 077
+    install -d -m 0700 "$BACKUP_DIR"
+    if [ "$target" = --shared ]; then
+        # Everything all instances share: the whole Keycloak database (master realm and all realms)
+        dir="$BACKUP_DIR/_shared"; install -d -m 0700 "$dir"
+        $PG_DUMP_ADMIN -Fc keycloak > "$dir/keycloak.dump.tmp" \
+            || { rm -f "$dir/keycloak.dump.tmp"; die "dump of the Keycloak database failed"; }
+        mv "$dir/keycloak.dump.tmp" "$dir/keycloak.dump"
+        log "Keycloak database saved in $dir"
+        return 0
+    fi
+    require_instance "$target"
+    local name="$target" env realm image
+    env="$(instance_env "$name")"
+    realm="$(env_value "$env" KEYCLOAK_REALM_NAME)"
+    image="$(image_of "$name")"
+    dir="$BACKUP_DIR/$name"; install -d -m 0700 "$dir"
+
+    ( pg_vars "$(env_value "$env" DATABASE_CONNECTION)"; export PGUSER PGPASSWORD PGDATABASE PGHOST PGPORT
+      $PG_DUMP -Fc -f "$dir/tapir.dump.tmp" ) \
+        || { rm -f "$dir/tapir.dump.tmp"; die "dump of the database of $name failed"; }
+    mv "$dir/tapir.dump.tmp" "$dir/tapir.dump"
+
+    if uses_shared_keycloak "$name"; then
+        # kc.sh export runs beside the server (profile nonserver) and reads the database directly
+        local tmp="/tmp/tapir-backup-$realm.json"
+        podman exec tapir-keycloak /opt/keycloak/bin/kc.sh export --realm "$realm" --users same_file \
+            --file "$tmp" > "$dir/realm-export.log" 2>&1 \
+            || die "export of the Keycloak realm $realm failed, see $dir/realm-export.log"
+        podman exec tapir-keycloak cat "$tmp" > "$dir/realm.json.tmp"
+        podman exec tapir-keycloak rm -f "$tmp"
+        grep -q '"realm" : "'"$realm"'"' "$dir/realm.json.tmp" || die "the export of the realm $realm is incomplete"
+        mv "$dir/realm.json.tmp" "$dir/realm.json"
+        rm -f "$dir/realm-export.log"
+    else
+        rm -f "$dir/realm.json"
+        warn "$name does not use the shared Keycloak - its realm is not part of this backup"
+    fi
+
+    cat > "$dir/backup.info" <<EOF
+# Written by tapir-instance backup
+instance=$name
+date=$(date -Iseconds)
+domain=$(env_value "$env" TAPIR_DOMAIN)
+realm=$realm
+image=$image
+image_id=$(podman image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)
+image_digest=$(podman image inspect --format '{{.Digest}}' "$image" 2>/dev/null || true)
+EOF
+    log "$name saved in $dir ($(du -sh "$dir" | cut -f1))"
+}
+
+cmd_restore() {  # name [--from <dir>] [--no-realm] [--yes]
+    local name="${1:-}" from="" realm_too=true yes=false; shift || true
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --from) from="$2"; shift 2 ;;
+            --no-realm) realm_too=false; shift ;;
+            --yes) yes=true; shift ;;
+            *) die "unknown option $1" ;;
+        esac
+    done
+    check_name "$name"
+    from="${from:-$BACKUP_DIR/$name}"
+    [ -r "$from/tapir.dump" ] || die "no $from/tapir.dump - restore the files of the job tapir-$name with Bareos first"
+    require_instance "$name"
+    local env realm url
+    env="$(instance_env "$name")"
+    realm="$(env_value "$env" KEYCLOAK_REALM_NAME)"
+    url="$(env_value "$env" DATABASE_CONNECTION)"
+    [ -r "$from/realm.json" ] || realm_too=false
+    if [ "$yes" != true ]; then
+        [ -t 0 ] || die "restore replaces the database (and the Keycloak realm) of $name - confirm with --yes"
+        printf 'The database of %s%s will be replaced by the backup in %s (%s).\nType the name of the instance to continue: ' \
+            "$name" "$([ "$realm_too" = true ] && echo " and the Keycloak realm $realm")" "$from" \
+            "$(sed -n 's/^date=//p' "$from/backup.info" 2>/dev/null || echo 'date unknown')"
+        local answer; read -r answer
+        [ "$answer" = "$name" ] || die "aborted"
+    fi
+
+    log "Stopping $name"
+    read -ra unit_list <<< "$(units "$name")"
+    $SYSTEMCTL stop "tapir-$name.target" "${unit_list[@]}" 2>/dev/null || true
+
+    log "Restoring the database"
+    local PGUSER PGPASSWORD PGDATABASE PGHOST PGPORT
+    pg_vars "$url"
+    case "$PGHOST" in
+        127.0.0.1|localhost|"$PG_HOST")
+            # Database on this machine: recreate it, the role keeps the password from the env file
+            local role="$PGUSER" db="$PGDATABASE" password="$PGPASSWORD"
+            if [ "$(psql_admin -c "SELECT 1 FROM pg_roles WHERE rolname = '$role'")" = 1 ]; then
+                psql_admin -c "ALTER ROLE \"$role\" LOGIN PASSWORD '$password'"
+            else
+                psql_admin -c "CREATE ROLE \"$role\" LOGIN PASSWORD '$password'"
+            fi
+            psql_admin -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE)"
+            psql_admin -c "CREATE DATABASE \"$db\" OWNER \"$role\""
+            $PG_RESTORE_ADMIN --no-owner --role="$role" --exit-on-error -d "$db" < "$from/tapir.dump" \
+                || die "restoring the database $db failed"
+            ;;
+        *)
+            ( export PGUSER PGPASSWORD PGDATABASE PGHOST PGPORT
+              $PG_RESTORE --clean --if-exists --no-owner --exit-on-error -d "$PGDATABASE" "$from/tapir.dump" ) \
+                || die "restoring the database $PGDATABASE on $PGHOST failed"
+            ;;
+    esac
+
+    if [ "$realm_too" = true ]; then
+        log "Restoring the Keycloak realm $realm"
+        # A running Keycloak is only logged into, a lost one is set up again (keycloak.env from Bareos)
+        if [ -r "$KC_ENV" ] && podman container exists tapir-keycloak 2>/dev/null; then kc_login; else ensure_keycloak 8800; fi
+        if kcadm get "realms/$realm" >/dev/null 2>&1; then kcadm delete "realms/$realm"; fi
+        kcadm create realms -f - < "$from/realm.json" >/dev/null || die "creating the realm $realm from the backup failed"
+        ensure_realm "$name" "$realm" "$(env_value "$env" TAPIR_DOMAIN)"
+    fi
+
+    install -d -m 0750 "$TAPIR_LIB/$name"
+    $CHOWN -R "$CONTAINER_UID:$CONTAINER_UID" "$TAPIR_LIB/$name"
+    podman pull -q "$(image_of "$name")" >/dev/null 2>&1 || podman image exists "$(image_of "$name")" \
+        || die "image $(image_of "$name") not available"
+    ensure_redis
+    ensure_instance_redis "$name"
+    # The cache may still hold objects of the replaced database
+    redis_cli -n "$(env_value "$env" TAPIR_REDIS_DB)" FLUSHDB >/dev/null || true
+    run_once "$name" migrate 2>&1 | tail -n 2
+    write_units "$name"
+    start_instance "$name"
+    [ -e "$NGINX_DIR/sites-available/tapir-$name" ] || write_nginx "$name"
+    log "Checks"
+    if check_instance "$name"; then log "$name restored from $from"; else die "some checks failed"; fi
+}
+
+# Bareos director resources (a FileSet and a Job per instance, one for the shared parts). The
+# settings come from $BAREOS_ENV; with BAREOS_CONFIG_DIR set (a director on this machine), create,
+# adopt and remove keep the resources there up to date.
+bareos_setting() {  # key default
+    local value; value="$(env_value "$BAREOS_ENV" "$1")"; echo "${value:-$2}"
+}
+bareos_job() {  # name | --shared
+    local target="$1" client jobdefs schedule pool storage job title files exclude
+    client="$(bareos_setting BAREOS_CLIENT "$(hostname -s)-fd")"
+    jobdefs="$(bareos_setting BAREOS_JOBDEFS DefaultJob)"
+    schedule="$(bareos_setting BAREOS_SCHEDULE "")"
+    pool="$(bareos_setting BAREOS_POOL "")"
+    storage="$(bareos_setting BAREOS_STORAGE "")"
+    if [ "$target" = --shared ]; then
+        job=tapir-shared; title="Tapir: Keycloak database, settings and fonts shared by all instances"
+        files="$BACKUP_DIR/_shared $TAPIR_ETC $TAPIR_LIB/keycloak $TAPIR_LIB/theme-fonts $NGINX_DIR/snippets/tapir-keycloak.conf $QUADLET_DIR/tapir-keycloak.container $QUADLET_DIR/tapir-redis.container"
+        exclude="$INSTANCES $TAPIR_ETC/initial-passwords"
+    else
+        require_instance "$target"
+        job="tapir-$target"; title="Tapir $target (https://$(env_value "$(instance_env "$target")" TAPIR_DOMAIN)): database, Keycloak realm, files"
+        files="$BACKUP_DIR/$target $(instance_env "$target") $TAPIR_LIB/$target $NGINX_DIR/sites-available/tapir-$target"
+        exclude=""
+    fi
+    local file
+    cat <<EOF
+# Written by tapir-instance bareos - $title
+FileSet {
+  Name = "$job"
+  Description = "$title"
+  Include {
+    Options {
+      Signature = $(bareos_setting BAREOS_SIGNATURE XXH128)
+      Compression = LZ4
+    }
+$(for file in $files; do echo "    File = \"$file\""; done)
+  }
+$( [ -n "$exclude" ] && { echo "  Exclude {"; for file in $exclude; do echo "    File = \"$file\""; done; echo "  }"; } )
+}
+
+Job {
+  Name = "$job"
+  Description = "$title"
+  JobDefs = "$jobdefs"
+  Client = "$client"
+  FileSet = "$job"
+$( [ -n "$schedule" ] && echo "  Schedule = \"$schedule\"" )
+$( [ -n "$pool" ] && echo "  Pool = \"$pool\"" )
+$( [ -n "$storage" ] && echo "  Storage = \"$storage\"" )
+  # One bootstrap file per job: the default (%c.bsr) would be shared by all jobs of the client
+  Write Bootstrap = "/var/lib/bareos/%c-%n.bsr"
+  RunScript {
+    RunsWhen = Before
+    RunsOnClient = yes
+    FailJobOnError = yes
+    Command = "/usr/sbin/tapir-instance backup $([ "$target" = --shared ] && echo --shared || echo "$target")"
+  }
+}
+EOF
+}
+# Writes (or with --remove deletes) the resources of one job in a bareos-dir.d directory
+bareos_write() {  # dir name|--shared [--remove]
+    local dir="$1" target="$2" job
+    [ "$target" = --shared ] && job=tapir-shared || job="tapir-$target"
+    if [ "${3:-}" = --remove ]; then
+        for kind in job fileset; do
+            grep -qs '^# Written by tapir-instance' "$dir/$kind/$job.conf" && rm -f "$dir/$kind/$job.conf"
+        done
+        log "Bareos job $job removed from $dir"
+        return 0
+    fi
+    install -d "$dir/job" "$dir/fileset"
+    local resources; resources="$(bareos_job "$target" | grep -v '^$')"
+    printf '%s\n' "$resources" | awk '/^Job \{/ { exit } { print }' > "$dir/fileset/$job.conf"
+    printf '%s\n' "$resources" | awk 'NR == 1 { print } /^Job \{/ { job = 1 } job { print }' > "$dir/job/$job.conf"
+    chgrp bareos "$dir/fileset/$job.conf" "$dir/job/$job.conf" 2>/dev/null || true
+    chmod 0640 "$dir/fileset/$job.conf" "$dir/job/$job.conf"
+    log "Bareos job $job in $dir"
+}
+bareos_reload() {
+    local reload; reload="$(bareos_setting BAREOS_RELOAD "bconsole")"
+    [ "$reload" = none ] && return 0
+    if command -v "${reload%% *}" >/dev/null && printf 'reload\nquit\n' | $reload >/dev/null 2>&1; then
+        log "Bareos director reloaded"
+    else
+        warn "reload the Bareos director yourself: echo reload | bconsole"
+    fi
+}
+# Called by create, adopt and remove: only does something with BAREOS_CONFIG_DIR set
+bareos_sync() {  # name [--remove]
+    local dir; dir="$(bareos_setting BAREOS_CONFIG_DIR "")"
+    [ -n "$dir" ] || return 0
+    [ -d "$dir" ] || { warn "BAREOS_CONFIG_DIR $dir does not exist - no Bareos job for $1"; return 0; }
+    bareos_write "$dir" "$1" ${2:-}
+    [ -e "$dir/job/tapir-shared.conf" ] || bareos_write "$dir" --shared
+    bareos_reload
+}
+
+cmd_bareos() {  # name|--shared|--all [--write <dir>]
+    local targets=() dir=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --all) targets+=(--shared)
+                   for env in "$INSTANCES"/*.env; do [ -e "$env" ] && targets+=("$(basename "$env" .env)"); done; shift ;;
+            --write) dir="${2:-}"; [ -n "$dir" ] || die "--write needs a directory (e.g. /etc/bareos/bareos-dir.d)"; shift 2 ;;
+            *) targets+=("$1"); shift ;;
+        esac
+    done
+    [ ${#targets[@]} -gt 0 ] || die "usage: tapir-instance bareos <name>|--shared|--all [--write <bareos-dir.d>]"
+    for target in "${targets[@]}"; do
+        if [ -n "$dir" ]; then bareos_write "$dir" "$target"; else bareos_job "$target" | grep -v '^$'; echo; fi
+    done
+    [ -z "$dir" ] || bareos_reload
+}
+
 cmd_list() {
     printf '%-16s %-34s %-7s %-16s %s\n' INSTANCE DOMAIN PORT REALM STATE
     for env in "$INSTANCES"/*.env; do
@@ -883,6 +1167,7 @@ cmd_remove() {
     [ "${2:-}" = --purge ] && purge=true
     local env; env="$(instance_env "$name")"
     $SYSTEMCTL disable --now "tapir-$name.target" >/dev/null 2>&1 || true
+    bareos_sync "$name" --remove
     for unit in $(units "$name") "tapir-$name-redis"; do $SYSTEMCTL stop "$unit.service" 2>/dev/null || true; done
     local redis_db; redis_db="$(env_value "$env" TAPIR_REDIS_DB)"
     rm -f "$QUADLET_DIR/tapir-$name-"*.container "$SYSTEMD_DIR/tapir-$name.target"
@@ -942,6 +1227,9 @@ main() {
         theme) cmd_theme "$@" ;;
         param) cmd_param "$@" ;;
         remove) cmd_remove "$@" ;;
+        backup) cmd_backup "$@" ;;
+        restore) cmd_restore "$@" ;;
+        bareos) cmd_bareos "$@" ;;
         ""|-h|--help|help) sed -n '2,/^[^#]/{/^#/p}' "$0" | sed 's/^# \{0,1\}//' ;;
         *) die "unknown command $command (see: tapir-instance --help)" ;;
     esac
