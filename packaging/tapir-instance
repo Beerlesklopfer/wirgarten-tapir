@@ -4,6 +4,7 @@
 #   tapir-instance create <name> --domain <host> --port <port> [--admin-email <mail>] [--realm <realm>]
 #                         [--image <image>] [--db-url <url>] [--keycloak-port <port>] [--no-nginx]
 #   tapir-instance adopt <name> [--domain <host>] [--admin-email <mail>]   take over a native (pre-container) installation
+#   tapir-instance keycloak <name>                                      move to (or refresh in) the shared Keycloak
 #   tapir-instance list
 #   tapir-instance status <name>
 #   tapir-instance upgrade <name>|--all [--image <image>]                 pull, migrate, restart
@@ -524,7 +525,20 @@ else:
             printf 'URL: https://%s\nUser: %s\nPassword: %s\n' "$(env_value "$(instance_env "$name")" TAPIR_DOMAIN)" \
                 "$email" "$password" > "$TAPIR_ETC/initial-passwords/$name-$email"
             log "$email created, initial password in $TAPIR_ETC/initial-passwords/$name-$email" ;;
-        exists) log "$email already has a Keycloak login" ;;
+        exists)
+            log "$email already has a Keycloak login"
+            # Tapir takes the rights from the Keycloak roles: an admin needs the group superuser
+            if [ "$admin" = true ]; then
+                local realm user_id group_id
+                realm="$(env_value "$(instance_env "$name")" KEYCLOAK_REALM_NAME)"
+                kc_login
+                user_id="$(kcadm get users -r "$realm" -q "email=$email" -q exact=true --fields id --format csv --noquotes | head -n 1)"
+                group_id="$(kcadm get groups -r "$realm" -q search=superuser --fields id,name --format csv --noquotes \
+                    | awk -F, '$2 == "superuser" {print $1}' | head -n 1)"
+                [ -n "$user_id" ] && [ -n "$group_id" ] || die "could not add $email to the group superuser of realm $realm"
+                kcadm update "users/$user_id/groups/$group_id" -r "$realm" -n
+                log "$email is in the group superuser of realm $realm"
+            fi ;;
         *) die "creating $email failed: $result" ;;
     esac
 }
@@ -882,6 +896,12 @@ cmd_remove() {
             redis_cli -n "$redis_db" FLUSHDB >/dev/null || true
         fi
         $RM_DATA "${TAPIR_LIB:?}/$name"
+        # An enabled link to the removed site would make nginx -t fail
+        local link
+        for link in "$NGINX_DIR"/sites-enabled/*; do
+            [ -L "$link" ] && [ "$(readlink -f "$link")" = "$(readlink -f "$NGINX_DIR/sites-available/tapir-$name")" ] \
+                && rm -f "$link" && log "removed $link - reload nginx: nginx -t && systemctl reload nginx"
+        done
         rm -f "$NGINX_DIR/sites-available/tapir-$name"
         rm -f "$env"
         log "$name removed with database, realm and data"

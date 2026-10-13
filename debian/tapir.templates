@@ -31,7 +31,8 @@ Template: tapir/port
 Type: string
 Default: 8000
 Description: Local port of the instance:
- gunicorn listens on 127.0.0.1:<port>, redis on <port> + 10000.
+ gunicorn listens on 127.0.0.1:<port>. Keycloak (8800) and redis (6380) are
+ shared by all instances.
 
 Template: tapir/admin_email
 Type: string
