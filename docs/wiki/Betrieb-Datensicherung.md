@@ -7,7 +7,9 @@
 > Rollen und Clients. Bareos sichert dann dieses Verzeichnis, die env-Datei, `/var/lib/tapir/<name>`
 > und die nginx-Site. Einmal je Server sichert der Job `tapir-shared` die gemeinsamen Teile:
 > die ganze Keycloak-Datenbank, `/etc/tapir` und die lizenzierten Schriften.
-> `tapir-instance bareos` erzeugt die Director-Konfiguration. Läuft der Director auf demselben
+> `tapir-instance bareos` erzeugt die Director-Konfiguration (Bareos, auch
+> [baReos-dird](https://github.com/Beerlesklopfer/baReos-dird)); den Überblick über Pools, Jobs und Clients gibt
+> [Onesimus](https://github.com/Beerlesklopfer/Onesimus). Läuft der Director auf demselben
 > Rechner, legen `create`, `adopt` und `remove` die Jobs selbst an und entfernen sie wieder.
 > `tapir-instance restore <name>` spielt eine Sicherung zurück: eine Instanz allein, ohne die
 > anderen anzufassen.
@@ -328,6 +330,16 @@ sudo runuser -u postgres -- psql -c 'DROP DATABASE IF EXISTS keycloak WITH (FORC
 sudo runuser -u postgres -- pg_restore --no-owner --role=keycloak -d keycloak < /var/backups/tapir/_shared/keycloak.dump
 sudo systemctl start tapir-keycloak
 ```
+
+## Werkzeuge rund um Bareos
+
+| Projekt | Was es ist | Nutzen für die Tapir-Sicherung |
+|---|---|---|
+| [Onesimus](https://github.com/Beerlesklopfer/Onesimus) ([onesimus.io](https://onesimus.io)) | Qt-Desktop-Oberfläche für Bareos und Bacula; spricht den Director über die bconsole-Schnittstelle an, nie direkt die Datenbank (GPL-3.0, Alpha) | Belegung der Pools, Wachstum und Prognosen, Verbrauch je Job und Client (also je Tapir-Instanz), wiederverwendbare Volumes – vom Arbeitsplatz aus, ohne Web-Oberfläche auf dem Backup-Server |
+| [baReos-dird](https://github.com/Beerlesklopfer/baReos-dird) (`onesimusd`, nicht öffentlich) | Director-Nachbau in Rust, als Ersatz für `bareos-dir`; liest dasselbe Verzeichnis `bareos-dir.d`, arbeitet mit den C++-Daemons (File und Storage Daemon) und TLS-PSK | Die von `tapir-instance bareos` erzeugten FileSets und Jobs sind gewöhnliche Bareos-Konfiguration; mit `onesimusd` sind sie noch nicht getestet (vor allem `RunScript` vor dem Job) |
+
+Beide Projekte sind in Entwicklung (Onesimus: Alpha). Für die Sicherung der Solawi-Daten ist der
+Director von Bareos selbst der getestete Weg; baReos-dird ist nur mit Zugang zum Repository sichtbar.
 
 ## Hinweise
 
