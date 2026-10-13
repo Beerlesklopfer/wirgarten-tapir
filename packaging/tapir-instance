@@ -1156,6 +1156,9 @@ bareos_job() {  # name | --shared
     local target="$1" client jobdefs schedule pool storage job title files exclude
     client="$(bareos_client_name)"
     jobdefs="$(bareos_setting BAREOS_JOBDEFS DefaultJob)"
+    if [ "$jobdefs" = none ] && { [ -z "$(bareos_setting BAREOS_POOL "")" ] || [ -z "$(bareos_setting BAREOS_STORAGE "")" ]; }; then
+        warn "BAREOS_JOBDEFS=none needs BAREOS_POOL and BAREOS_STORAGE in $BAREOS_ENV"
+    fi
     schedule="$(bareos_setting BAREOS_SCHEDULE "")"
     pool="$(bareos_setting BAREOS_POOL "")"
     storage="$(bareos_setting BAREOS_STORAGE "")"
@@ -1188,7 +1191,11 @@ $( [ -n "$exclude" ] && { echo "  Exclude {"; for file in $exclude; do echo "   
 Job {
   Name = "$job"
   Description = "$title"
-  JobDefs = "$jobdefs"
+$( if [ "$jobdefs" = none ]; then
+       printf '%s\n' "  Type = Backup" "  Level = Incremental" "  Messages = \"$(bareos_setting BAREOS_MESSAGES Standard)\""
+       [ -n "$pool" ] || echo "  Pool = \"<set BAREOS_POOL>\""
+       [ -n "$storage" ] || echo "  Storage = \"<set BAREOS_STORAGE>\""
+     else echo "  JobDefs = \"$jobdefs\""; fi )
   Client = "$client"
   FileSet = "$job"
 $( [ -n "$schedule" ] && echo "  Schedule = \"$schedule\"" )
