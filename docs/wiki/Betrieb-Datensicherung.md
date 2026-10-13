@@ -173,6 +173,11 @@ sudo sh -c 'umask 077; tapir-instance bareos --all > /root/tapir-bareos.conf'   
 sudo tapir-instance bareos ackervielfalt                                       # nur FileSet und Job einer Instanz
 ```
 
+Die Datei beginnt mit einer **Anleitung in Kommentaren**: was im File Daemon auf dem Server für
+den Director stehen muss (mit Prüfung, ob die Datei da ist), wohin die Datei auf dem Director
+gehört, welche Rechte sie braucht und wie man testet. Bareos überliest die Kommentare; die Datei
+lässt sich unverändert einfügen.
+
 `--all` (und `--shared`) enthält den **Client** mit dem Passwort des File Daemon, die Datei deshalb
 nur für root lesbar ablegen und nach dem Kopieren löschen. Auf dem Director als eine Datei
 ablegen, z. B. `bareos-dir.d/job/tapir-forgeiec.conf` (Bareos liest jede `*.conf` unter
@@ -406,17 +411,17 @@ onesimus-dird bildet CN oder SAN des Zertifikats auf den Namen der Console ab.
 #### 1. Zertifikat auf dem Server, mit Intranet-Namen
 
 Ein eigenes Zertifikat `bareos`, damit die Website-Zertifikate unberührt bleiben. Beispiel für den
-Director-Rechner `ws-joerg.intranet.bernau.family`. Let's Encrypt prüft jeden Namen von außen,
+Director-Rechner `pdc.intranet.bernau.family`. Let's Encrypt prüft jeden Namen von außen,
 der Intranet-Name steht aber nur im internen DNS:
 
 | Weg | Was zu tun ist | Folge |
 |---|---|---|
-| **HTTP-01** (einfach) | in der öffentlichen Zone `bernau.family` einen A-Eintrag `ws-joerg.intranet` auf die Adresse von forgeiec.io; der interne DNS beantwortet den Namen im Heimnetz weiter mit der internen Adresse (Split-DNS) | der Hostname ist öffentlich sichtbar; nginx auf dem Server muss für diesen Namen `/.well-known/acme-challenge/` aus `/var/www/html` ausliefern (Standard-Site) |
-| **DNS-01** | certbot setzt den TXT-Eintrag `_acme-challenge.ws-joerg.intranet.bernau.family` über die API des DNS-Anbieters | außer dem TXT-Eintrag nichts Öffentliches; braucht ein certbot-Plugin für den Anbieter der Zone `bernau.family` |
+| **HTTP-01** (einfach) | in der öffentlichen Zone `bernau.family` einen A-Eintrag `pdc.intranet` auf die Adresse von forgeiec.io; der interne DNS beantwortet den Namen im Heimnetz weiter mit der internen Adresse (Split-DNS) | der Hostname ist öffentlich sichtbar; nginx auf dem Server muss für diesen Namen `/.well-known/acme-challenge/` aus `/var/www/html` ausliefern (Standard-Site) |
+| **DNS-01** | certbot setzt den TXT-Eintrag `_acme-challenge.pdc.intranet.bernau.family` über die API des DNS-Anbieters | außer dem TXT-Eintrag nichts Öffentliches; braucht ein certbot-Plugin für den Anbieter der Zone `bernau.family` |
 
 ```sh
 sudo certbot certonly --cert-name bareos --webroot -w /var/www/html \
-    -d forgeiec.io -d ws-joerg.intranet.bernau.family
+    -d forgeiec.io -d pdc.intranet.bernau.family
 ```
 
 Nach jeder Erneuerung legt ein Hook Zertifikat und Schlüssel als echte Dateien (keine Links) dort

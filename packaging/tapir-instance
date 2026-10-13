@@ -1030,6 +1030,60 @@ bareos_fd_password() {  # director
         return 0
     done
 }
+# File of the director's resource in the file daemon configuration (empty if there is none)
+bareos_fd_file() {  # director
+    local file
+    for file in "$(bareos_setting BAREOS_FD_CONFIG /etc/bareos/bareos-fd.d)/director"/*.conf; do
+        [ -r "$file" ] && grep -qiE "^[[:space:]]*Name[[:space:]]*=[[:space:]]*\"?$1\"?[[:space:]]*(#.*)?$" "$file" \
+            && { echo "$file"; return 0; }
+    done
+}
+# Instructions as comments at the top of the generated configuration: what the file daemon on this
+# server needs, where the rest goes on the director, how to test it
+bareos_instructions() {  # first instance (for the test command)
+    local client director address passive fd_dir fd_file status target
+    client="$(bareos_setting BAREOS_CLIENT "$(hostname -s)-fd")"
+    director="$(bareos_setting BAREOS_DIRECTOR bareos-dir)"
+    address="$(bareos_setting BAREOS_CLIENT_ADDRESS "$(hostname -f)")"
+    passive="$(bareos_setting BAREOS_PASSIVE yes)"
+    fd_dir="$(bareos_setting BAREOS_FD_CONFIG /etc/bareos/bareos-fd.d)"
+    fd_file="$(bareos_fd_file "$director")"
+    if [ -n "$fd_file" ]; then status="found: $fd_file"
+    else status="NOT FOUND - install bareos-filedaemon, or create $fd_dir/director/$director.conf as shown"; fi
+    target="/etc/bareos/bareos-dir.d/job/tapir-${client%-fd}.conf"
+    cat <<EOF
+# ==================================================================================================
+# Bareos configuration for the Tapir server $address - written by tapir-instance bareos
+# Contains the password of the file daemon: keep this file root-only and delete it after copying.
+#
+# 1. FILE DAEMON on $address (this server) needs the director in
+#      ${fd_file:-$fd_dir/director/$director.conf}
+#        Director {
+#          Name = $director        # = Name of your director (bareos-dir.d/director/*.conf there);
+#                                  #   another name: change it here and set BAREOS_DIRECTOR in $BAREOS_ENV
+#          Password = "..."        # the same password as in the Client resource below
+#        }
+#      Status: $status
+#      After a change: systemctl restart bareos-fd, then generate this file again.
+#      Firewall: port 9102/tcp of $address reachable from the director$( [ "$passive" = yes ] && echo " and its storage daemon")
+$( [ "$passive" = yes ] && printf '%s
+' "#      Passive = yes: director and storage daemon connect to this server; it never connects back," \
+    "#      so the director may sit in a home network behind a router." )
+#
+# 2. DIRECTOR: paste this whole file on the director host into
+#      $target
+#    (any *.conf below bareos-dir.d/*/ works), then
+#      chown root:bareos $target && chmod 0640 $target
+#      sudo -u bareos bareos-dir -t && echo reload | bconsole
+#
+# 3. TEST in bconsole:
+#      status client=$client
+#      run job=tapir-${1:-<instance>} yes
+#      messages
+# ==================================================================================================
+
+EOF
+}
 # Client resource of this machine for the director: passive by default, so the director and the
 # storage daemon connect to the file daemon and the server never has to reach the director's network
 bareos_client() {
@@ -1047,6 +1101,8 @@ bareos_client() {
     esac
     cat <<EOF
 # Written by tapir-instance bareos - Client $client ($address), contains the password of the file daemon
+# Counterpart on $address: Director { Name = $director; Password = <the same> } in
+# $(bareos_setting BAREOS_FD_CONFIG /etc/bareos/bareos-fd.d)/director/ - see: tapir-instance bareos --shared
 Client {
   Name = "$client"
   Description = "Tapir server $address"
@@ -1180,7 +1236,15 @@ cmd_bareos() {  # name|--shared|--all [--write <dir>]
     for target in "${targets[@]}"; do
         if [ -n "$dir" ]; then bareos_write "$dir" "$target"
         else
-            [ "$target" = --shared ] && { bareos_client; echo; }
+            if [ "$target" = --shared ]; then
+                local first=""
+                for env in "$INSTANCES"/*.env; do [ -e "$env" ] && { first="$(basename "$env" .env)"; break; }; done
+                bareos_instructions "$first"
+                bareos_client; echo
+            elif [ "$target" = "${targets[0]}" ]; then
+                printf '# Paste on the director host into /etc/bareos/bareos-dir.d/job/tapir-%s.conf - needs the Client\n# %s from: tapir-instance bareos --shared\n\n' \
+                    "$target" "$(bareos_setting BAREOS_CLIENT "$(hostname -s)-fd")"
+            fi
             bareos_job "$target" | grep -v '^$'; echo
         fi
     done
