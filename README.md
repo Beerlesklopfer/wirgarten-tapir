@@ -89,6 +89,7 @@ Everything else is done with the tools of the package (all for root):
 | `tapir-instance upgrade <name>\|--all [--image <image>]` | pull the image, migrate, restart |
 | `tapir-instance user-add <name> <mail> [--admin]` | Tapir user with Keycloak login |
 | `tapir-instance adopt <name>` | take over a native installation |
+| `tapir-instance theme <name> <theme>` / `param <name> [<key> [<value>]]` | theme of Tapir and Keycloak / parameters locked in the web UI |
 | `tapir-instance remove <name> [--purge]` | stop and remove (with `--purge` also database, realm, data) |
 | `tapir-manage <name> <manage.py args>` | e.g. `tapir-manage ackervielfalt shell` |
 | `tapir-kcadm --realm <realm> user list\|add\|passwd\|role\|group\|...` | Keycloak on the command line, realm always explicit (`rwxrwx---` root) |
@@ -97,7 +98,8 @@ The nginx site of an instance is written to `/etc/nginx/sites-available/tapir-<n
 exists, e.g. `certbot certonly --webroot -w /var/www/html -d <host>`, then HTTPS after `tapir-instance nginx <name>`);
 enabling it is left to you. An nginx site of the domain that is already enabled gets the Keycloak login paths added
 (with backup and `nginx -t`). The Keycloak admin console is not public; use `tapir-kcadm` or
-`ssh -L 8800:127.0.0.1:8800 root@<server>` and http://localhost:8800/admin. Details: [packaging/README.md](packaging/README.md).
+`ssh -L 8800:127.0.0.1:8800 root@<server>` and http://localhost:8800/admin. Details: [packaging/README.md](packaging/README.md),
+complete reference (German) in the wiki: [Betrieb mit tapir-instance](https://github.com/Beerlesklopfer/wirgarten-tapir/wiki/Betrieb-tapir-instance).
 
 ## Contributing & GitHub issues
 

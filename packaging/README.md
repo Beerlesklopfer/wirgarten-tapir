@@ -1,7 +1,8 @@
 # Debian package and container operation
 
 Tapir runs in production as podman containers under systemd; the Debian package `tapir` (`Architecture: all`,
-Debian 13 trixie) only brings the tools and templates.
+Debian 13 trixie) only brings the tools and templates. Complete reference (German):
+[wiki: Betrieb](https://github.com/Beerlesklopfer/wirgarten-tapir/wiki/Betrieb).
 
 | Path | Content |
 |---|---|
@@ -117,7 +118,7 @@ packaging/build-deb.sh 0.2.0+local1         # -> build-deb/tapir_*_all.deb
 ## CI / APT repository
 
 `.github/workflows/debian-package.yml` (manual or on `v*` tags) builds and pushes the production image to
-`ghcr.io/<owner>/<repo>` (tags: version, `latest` on `v*` tags, `edge`, `sha-…`), builds the `.deb`,
+`ghcr.io/<owner>/<repo>` (tags: `latest` and `edge` on every run, version on `v*` tags, `sha-…`), builds the `.deb`,
 attaches it to a `deb-<version>` prerelease and publishes a signed APT repository
 with the latest `KEEP_VERSIONS` packages to GitHub Pages. One-time setup:
 
