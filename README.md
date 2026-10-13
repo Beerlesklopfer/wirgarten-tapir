@@ -101,6 +101,20 @@ enabling it is left to you. An nginx site of the domain that is already enabled 
 `ssh -L 8800:127.0.0.1:8800 root@<server>` and http://localhost:8800/admin. Details: [packaging/README.md](packaging/README.md),
 complete reference (German) in the wiki: [Betrieb mit tapir-instance](https://github.com/Beerlesklopfer/wirgarten-tapir/wiki/Betrieb-tapir-instance).
 
+## Documentation (wiki)
+
+The [wiki](https://github.com/Beerlesklopfer/wirgarten-tapir/wiki) (German: Handbuch, Betrieb,
+Development) is kept in [`docs/wiki/`](docs/wiki) - change pages there, in the same branch as the
+code they describe, and publish them after the merge:
+
+```sh
+git clone git@github.com:Beerlesklopfer/wirgarten-tapir.wiki.git /tmp/tapir-wiki
+cp -r docs/wiki/. /tmp/tapir-wiki/
+cd /tmp/tapir-wiki && git add -A && git commit -m "Wiki from master" && git push
+```
+
+GitHub renders Mermaid strictly: quote labels that contain `:`, `;`, `{}` or start with `/`.
+
 ## Contributing & GitHub issues
 
 You are very welcome to try Tapir locally with the "Getting started" instructions above and do your own thing. The
