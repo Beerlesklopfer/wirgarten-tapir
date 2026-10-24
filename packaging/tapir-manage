@@ -1,0 +1,3 @@
+#!/bin/sh
+# manage.py of a Tapir instance: tapir-manage <instance> <arguments>, e.g. tapir-manage ackervielfalt createsuperuser
+exec tapir-instance manage "$@"
