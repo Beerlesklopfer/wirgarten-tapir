@@ -38,6 +38,11 @@ jobs:
             type=raw,value=edge
             type=sha
 
+      # Exact pin from pyproject.toml ("3.14.9"); empty for a range such as "^3.14" (the Containerfile default applies)
+      - name: Python version of the project
+        id: py
+        run: echo "version=$(sed -n 's/^python = \"\([0-9][0-9.]*\)\"$/\1/p' pyproject.toml)" >> "$GITHUB_OUTPUT"
+
       - name: Build the production image
         uses: docker/build-push-action@v7
         with:
@@ -46,7 +51,9 @@ jobs:
           load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: TAPIR_VERSION=${{ github.ref_name }}-${{ github.sha }}
+          build-args: |
+            TAPIR_VERSION=${{ github.ref_name }}-${{ github.sha }}
+            PYTHON_VERSION=${{ steps.py.outputs.version || '3.14' }}
 
       # The image has no dev dependencies: Django must start and load every URL without them
       # (no database needed for the system checks)
