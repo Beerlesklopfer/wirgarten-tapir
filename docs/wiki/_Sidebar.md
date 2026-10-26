@@ -27,6 +27,7 @@
 - [Konfiguration](Betrieb-Konfiguration)
 - [Keycloak und Benutzer](Betrieb-Keycloak)
 - [Datensicherung (Bareos)](Betrieb-Datensicherung)
+- [Datenschutz und Löschung](Betrieb-Datenschutz)
 - [Fehlersuche](Betrieb-Fehlersuche)
 
 **Development**
