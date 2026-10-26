@@ -71,7 +71,7 @@ Außerhalb der Datenbank:
   ([Keycloak und Benutzer](Betrieb-Keycloak)).
 - **Mailserver:** Versendete Mails liegen beim Empfänger und im Postausgang des Mailservers.
 - **Datensicherung:** [Bareos](Betrieb-Datensicherung) sichert die Datenbank. Gelöschte Daten
-  stecken bis zum Ablauf der Aufbewahrungszeit der Sicherung weiter in den Backups.
+  stecken weiter in den Sicherungen, siehe [Datensicherung, Archiv und Restore](#datensicherung-archiv-und-restore).
 - **Dateisystem und Logs:** Nginx- und Anwendungslogs mit IP-Adressen und Anmeldenamen.
 
 ## Was „Mitglied löschen“ heute tut
@@ -101,7 +101,8 @@ Aus dem Quelltext abgeleitet, noch nicht an einer laufenden Instanz geprüft:
    - Protokolleinträge anderer Personen können Daten des Mitglieds als Text oder in Feldwerten
      enthalten.
    - `ScheduledTask` kann Mitglieds-IDs in den Argumenten tragen.
-   - Mitglieder-Daten stecken weiter in Mails, die schon raus sind, und in Datensicherungen.
+   - Mitglieder-Daten stecken weiter in Mails, die schon raus sind, und in Datensicherungen
+     (siehe nächster Abschnitt).
    - `MemberExtraEmail` und `MemberCredit` hängen am Mitglied, stehen aber nicht in der Liste des
      Löschknopfs. Ob sie über die Datenbank-Kaskade verschwinden, ist zu prüfen.
 3. **Keine Auskunft:** Es gibt keine Funktion, die alle Daten eines Mitglieds gesammelt ausgibt
@@ -124,18 +125,87 @@ Diese Punkte entscheidet die Genossenschaft, nicht der Code:
   bereits gelöschte Mitglieder nicht zurückkommen?
 - Wer beantwortet Anträge (Art. 12 Abs. 3), und wie wird das protokolliert?
 
+## Datensicherung, Archiv und Restore
+
+Datensicherungen sind Pflicht (Art. 32 DSGVO: Verfügbarkeit und Wiederherstellbarkeit). Sie
+widersprechen der Löschpflicht nicht, wenn man sie regelt. Die Regelung besteht aus **zwei
+getrennten Sicherungen mit eigenen Jobs und Pools**. Die Einrichtung der Bareos-Jobs steht in
+[Datensicherung (Bareos)](Betrieb-Datensicherung).
+
+> **Stand:** Heute sichern `tapir-shared` und `tapir-<name>` im Pool `Tapir` mit dem Zeitplan
+> `WeeklyCycle` (Full, Differential, Incremental), `VolumeRetention = 6 months`, `ActionOnPurge = None`.
+> Always Incremental ist **nicht** eingerichtet, ein Archiv-Pool gibt es nicht. Die Tabelle
+> unten ist ein **Vorschlag**, noch nicht umgesetzt.
+
+| | Betriebs-Backup | Archiv |
+|---|---|---|
+| Zweck | Wiederherstellung nach Ausfall oder Fehler | gesetzliche Aufbewahrung (Steuer, Buchführung, Mitgliederliste) |
+| Inhalt | Datenbank, Keycloak-Realm, Dateien | lesbarer Export der aufbewahrungspflichtigen Daten je Jahr und Mitglied (CSV/JSON/PDF) mit Prüfsummen |
+| Schema | Always Incremental, kurze Job-Retention | Jahres-Full, **nicht** konsolidiert |
+| Pool | `Tapir` | eigener Pool, zum Beispiel `Tapir-Archiv` |
+| Aufbewahrung | Tage bis Wochen | 8 bis 10 Jahre, dann löschen |
+| Volumes | `ActionOnPurge = Truncate`, damit gelöschte Daten nicht auf der Platte bleiben | verschlüsselt, getrennt gelagert |
+| Zugriff | Betrieb | nur für den Aufbewahrungszweck, mit Protokoll, wer wann extrahiert hat (Art. 18) |
+| Löschung in Tapir | bleibt bis zum Consolidate enthalten | enthält die Pflichtdaten, auch wenn sie in Tapir gelöscht sind |
+
+### Was Always Incremental für die Löschung bedeutet
+
+Eine Always-Incremental-Kette hält **alle Stände der Dateien seit dem letzten Full**. Der
+Datenbank-Dump liegt immer unter demselben Pfad, jeder Lauf sichert ihn neu. Ein Mitglied, das in
+Tapir gelöscht wird, steckt deshalb in allen älteren Dumps der Kette. Erst das Consolidate
+schiebt den Stichtag über die Löschung hinaus, sobald ein Lauf älter als die
+*Always Incremental Job Retention* ist. Die Aufbewahrung in der Sicherung ist also **Job-Retention
+plus Zeit bis zum Consolidate**, begrenzt durch *Always Incremental Max Full Age*. Mit
+`ActionOnPurge = None` bleiben die Daten außerdem auf dem Volume, bis es überschrieben wird. Die
+genauen Abläufe sollte man an einem Testjob prüfen, bevor man Betroffenen eine Frist nennt.
+
+### Restore ist ein Merge
+
+Ein Restore stellt einen **Stand** wieder her. Das ist bei Tapir nicht genug:
+
+- Der ganze Stand verliert alles, was seitdem passiert ist (neue Mitglieder, Zahlungen).
+- Er bringt Mitglieder zurück, die inzwischen gelöscht wurden. Das verletzt Art. 17.
+- Einzelne Tabellen zurückzuspielen bricht Fremdschlüssel und Summen.
+
+Gebraucht wird die Wiederherstellung **eines zusammenhängenden Datensatzes** (Mitglied mit allen
+abhängigen Daten). Dafür gibt es zwei Wege:
+
+- **Bareos-Plugin** (Python-File-Daemon-Plugin): verworfen. Das Plugin kennt Dateien, keine
+  Mitglieder und Fremdschlüssel. Die Fachlogik wäre doppelt und an die Bareos-Version gebunden.
+- **Tapir-Befehl und lesbares Archiv** (Vorschlag): ein Befehl in `tapir-instance` schreibt die
+  Pflichtdaten als Export, läuft als `RunScript before` des Archiv-Jobs und Bareos archiviert das
+  Verzeichnis. Wer Daten für die Finanzverwaltung braucht, holt mit einem normalen Restore nur diese
+  Dateien. Zum Wiederherstellen in Tapir selbst fügt ein zweiter Befehl ein Mitglied samt abhängigen
+  Datensätzen wieder ein und beachtet dabei das **Löschprotokoll**.
+
+Voraussetzungen:
+
+1. Die Liste der abhängigen Modelle steht an **einer** Stelle und dient Löschung, Auskunft,
+   Archiv und Restore. Heute steht sie fest in `DeleteMemberApiView`.
+2. Ein **Löschprotokoll ohne Klardaten** (Mitglieds-ID, Zeitpunkt, Art der Löschung). Nach einem Restore werden
+   die Löschungen seit dem Stichtag wieder angewendet.
+3. Ein Test, der Löschen, Archiv und Restore durchspielt.
+
+### Offene Punkte
+
+- Ob das Archiv die **GoBD** erfüllt (unveränderbar, lesbar, auffindbar, auswertbar), bestätigen
+  Steuerberater oder Prüfungsverband.
+- Die **Mitgliederliste** (§§ 30, 31 GenG) muss Mitgliedern auf Wunsch zugänglich sein, das geht nicht
+  nur aus einem Kaltarchiv. Entweder führt die Genossenschaft sie separat (Papier oder Datei), oder
+  Tapir behält ein kleines Feldset (Mitgliedsnummer, Eintritt, Austritt, Anteile, Name).
+- Die Mitglieder sind in der Datenschutzerklärung darüber zu informieren, dass Daten bis zum
+  Ablauf der Fristen in Sicherung und Archiv liegen.
+
 ## Vorschlag für die Umsetzung
 
 1. **Datenübersicht festschreiben:** Pro Modell und Feld Zweck, Rechtsgrundlage, Frist und
-   Löschverhalten (löschen, anonymisieren, sperren, behalten). Das ist die Tabelle oben, ergänzt um
-   die Entscheidungen der Genossenschaft.
-2. **Löschen in Stufen statt einem Knopf:**
-   - *Vollständig löschen* für Konten ohne Buchungen (Probe, Test, Warteliste).
-   - *Anonymisieren* für ausgeschiedene Mitglieder mit Belegen: Namen, Adresse, Kontakt und Texte
-     werden durch Platzhalter ersetzt, Beträge, Daten und die Mitgliedsnummer bleiben.
-3. **Auskunft** aus derselben Datenübersicht erzeugen.
-4. **Fristen** per Hintergrundjob umsetzen ([Hintergrundjobs](Development-Hintergrundjobs)).
-5. **Exporte und Protokolle** einbeziehen.
+   Löschverhalten. Das ist die Tabelle oben, ergänzt um die Entscheidungen der Genossenschaft.
+2. **Löschen bleibt vollständig**, solange die Pflichtdaten vorher im Archiv liegen (siehe oben).
+   Der Löschknopf prüft, dass der Archivlauf nach der letzten Buchung gelaufen ist.
+3. **Archiv und Restore** wie im Abschnitt davor, als eigene Jobs in eigenen Pools.
+4. **Auskunft** aus derselben Datenübersicht erzeugen.
+5. **Fristen** per Hintergrundjob umsetzen ([Hintergrundjobs](Development-Hintergrundjobs)).
+6. **Exporte und Protokolle** einbeziehen.
 
 Die Datenübersicht lässt sich als Hilfsmittel nutzen, damit neue Modelle nicht vergessen werden:
 Ein Test könnte fehlschlagen, wenn ein Modell mit Bezug zu `Member` nicht in der Löschlogik oder in

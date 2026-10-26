@@ -351,3 +351,7 @@ Director von Bareos selbst der getestete Weg; baReos-dird ist nur mit Zugang zum
 - Ein Job, der nur mit `FAIL` endet, steht in `messages` mit der Meldung von `tapir-instance`,
   z. B. `dump of the database of <name> failed`. Häufige Ursachen und Abhilfe:
   [Fehlersuche](Betrieb-Fehlersuche#sicherung-schlägt-fehl).
+
+## Datenschutz und Löschung
+
+Die Sicherungen enthalten auch Daten gelöschter Mitglieder. Wie lange, warum es Betriebs-Backup und Archiv in getrennten Pools geben soll und wie ein Restore als Merge aussieht, steht in [Datenschutz und Löschung](Betrieb-Datenschutz#datensicherung-archiv-und-restore).
