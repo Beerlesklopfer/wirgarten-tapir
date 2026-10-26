@@ -18,6 +18,7 @@ Seiten dieses Abschnitts:
 | [Konfiguration](Betrieb-Konfiguration) | env-Datei der Instanz, Mail, gesperrte Parameter, Theme und Schriften |
 | [Keycloak und Benutzer](Betrieb-Keycloak) | `tapir-kcadm`, Admin-Konsole, Rollen, Passwörter |
 | [Datensicherung (Bareos)](Betrieb-Datensicherung) | eigener Bareos-Job je Instanz, `backup`, `restore`, Wiederherstellung des ganzen Servers |
+| [Datenschutz und Löschung](Betrieb-Datenschutz) | welche personenbezogenen Daten Tapir speichert, Rechtslage (DSGVO, GenG), was „Mitglied löschen“ tut und was offen ist |
 | [Fehlersuche](Betrieb-Fehlersuche) | Prüfungen, Logs, bekannte Fehler und ihre Behebung |
 
 Für Entwicklerinnen und Entwickler (Image-Bau, CI, APT-Repository):
