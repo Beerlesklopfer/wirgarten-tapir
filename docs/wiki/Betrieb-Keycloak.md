@@ -12,6 +12,33 @@
 > Kommandozeile, nur als root, und verlangt den Realm immer ausdrücklich, damit nie versehentlich
 > die falsche Solawi getroffen wird. Team-Konten legt man mit `tapir-instance user-add` an, denn
 > ein Konto braucht beides: einen Tapir-Benutzer und einen Keycloak-Login.
+> Die Admin-Konsole ist aus dem Internet nicht erreichbar: Wer Keycloak verwalten will, braucht
+> die Konsole des Servers, nicht nur ein Passwort.
+
+## Warum Verwaltung nur über den Server
+
+Eine öffentlich erreichbare Admin-Konsole ist eine Login-Seite für das mächtigste Konto des
+Servers: Der Admin im Master-Realm verwaltet alle Realms und damit die Logins aller Solawis.
+Gegen eine solche Seite kann jeder aus dem Internet Passwörter durchprobieren (Brute Force).
+
+Deshalb gilt hier:
+
+- nginx leitet nur `/realms/` und `/resources/` an Keycloak weiter. `/admin` gehört Tapir, die
+  Admin-Konsole und die Admin-REST-API von Keycloak sind von außen nicht erreichbar.
+- Keycloak lauscht nur auf `127.0.0.1`. Wer ihn verwalten will, muss sich am Server anmelden
+  (SSH) und root sein: Das Admin-Passwort steht nur in `/etc/tapir/keycloak.env` (`0600`).
+- `tapir-kcadm` macht diese Abschottung alltagstauglich. Benutzer, Passwörter, Rollen und Gruppen
+  lassen sich auf der Kommandozeile pflegen, ohne die Konsole freizugeben oder jedes Mal einen
+  SSH-Tunnel zu öffnen. Nur für Seltenes bleibt die Konsole über den Tunnel
+  ([Admin-Konsole](#admin-konsole)).
+
+Ein Angreifer muss damit erst den Server übernehmen, bevor er Keycloak verwalten kann. Das
+verkleinert die Angriffsfläche, wie es auch der Cyber Resilience Act verlangt (Anhang I:
+Angriffsflächen begrenzen, auch nach außen erreichbare Schnittstellen).
+
+Tapir selbst braucht die Admin-API trotzdem, für Logins aus dem Bestell-Wizard und für Rollen.
+Es erreicht sie intern über `127.0.0.1` mit dem Service-Account von `tapir-backend`, dessen Rechte
+auf den eigenen Realm beschränkt sind.
 
 ## Zusammenspiel
 
