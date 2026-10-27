@@ -3,16 +3,17 @@ import { getCsrfToken } from "../utils/getCsrfToken.ts";
 import AssociationMembershipCard from "./association_membership/AssociationMembershipCard.tsx";
 import MemberBankingDataBase from "./banking_data/MemberBankingDataBase.tsx";
 import CoopSharesCard from "./coop_shares/CoopSharesCard.tsx";
+import MemberDataDisclosureCard from "./data_disclosure/MemberDataDisclosureCard.tsx";
 import DeliveryListCard from "./deliveries_and_jokers/DeliveryListCard.tsx";
 import FuturePaymentsCard from "./future_payments/FuturePaymentsCard.tsx";
 import MemberMailCategoryCard from "./mail_category/MemberMailCategoryCard.tsx";
 import MemberMailingListsCard from "./mailing_lists/MemberMailingListsCard.tsx";
 import MemberProfilePaymentRhythmBase from "./payment_rhythm/MemberProfilePaymentRhythmBase.tsx";
+import PersonalDataDropdown from "./personal_data/PersonalDataDropdown.tsx";
 import MemberProfileSolidarityContributionCard from "./solidarity_contribution/MemberProfileSolidarityContributionCard.tsx";
 import SubscriptionCancellationCard from "./subscription_cancellation/SubscriptionCancellationCard.tsx";
 import SubscriptionCards from "./subscriptions/SubscriptionCards.tsx";
 import MemberProfileWaitingListCard from "./waiting_list/MemberProfileWaitingListCard.tsx";
-import PersonalDataDropdown from "./personal_data/PersonalDataDropdown.tsx";
 
 const domNodeDeliveryListCard = document.getElementById("delivery_list_card");
 if (domNodeDeliveryListCard) {
@@ -157,6 +158,20 @@ if (domNodeMemberMailCategory) {
   root.render(
     <MemberMailCategoryCard
       memberId={domNodeMemberMailCategory.dataset.memberId!}
+      csrfToken={getCsrfToken()}
+    />,
+  );
+}
+
+const domNodeMemberDataDisclosure = document.getElementById(
+  "member_data_disclosure",
+);
+if (domNodeMemberDataDisclosure) {
+  const root = createRoot(domNodeMemberDataDisclosure);
+
+  root.render(
+    <MemberDataDisclosureCard
+      memberId={domNodeMemberDataDisclosure.dataset.memberId!}
       csrfToken={getCsrfToken()}
     />,
   );
