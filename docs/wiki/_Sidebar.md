@@ -1,3 +1,5 @@
+⚠️ **Proof of Concept, nicht maßgeblich** – siehe [FoodCoopX-Doku](https://github.com/FoodCoopX/wirgarten-tapir/tree/master/docs)
+
 **[Home](Home)**
 
 **Handbuch**
