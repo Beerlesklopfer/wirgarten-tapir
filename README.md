@@ -1,5 +1,12 @@
 # Tapir
 
+> **Note: this fork is a finished proof of concept.**
+> It was built to estimate the effort of running Tapir ourselves (containers, APT package, backups).
+> Our solidarity farm decided to be hosted by FoodCoopX instead, so this fork is **not maintained for
+> production use**: no new images, packages or security updates. For Tapir itself, please use the
+> upstream repository [FoodCoopX/wirgarten-tapir](https://github.com/FoodCoopX/wirgarten-tapir).
+> Contributions go upstream as small pull requests; this fork only carries their branches.
+
 [![Python code test coverage](https://sonarcloud.io/api/project_badges/measure?project=FoodCoopX_wirgarten-tapir&metric=coverage)](https://sonarcloud.io/summary/overall?id=FoodCoopX_wirgarten-tapir&branch=master)
 
 Tapir is a management system for community supported agriculture. It is currently used productively by several
@@ -58,6 +65,10 @@ If you want a fresh setup, for example after switching branches, the equivalent 
 is `./scripts/reset_and_start_local_server.sh`
 
 ## Running in production (containers, APT)
+
+> **Proof of concept, not maintained.** The image and the APT repository below are no longer updated
+> and get no security fixes. Do not use them for a production installation. The section stays as
+> documentation of what the proof of concept covered.
 
 In production every Tapir instance - one per solidarity farm - runs as podman containers under systemd: web
 (gunicorn), celery worker and celery beat from the production image
