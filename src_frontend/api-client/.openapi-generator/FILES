@@ -137,6 +137,12 @@ models/MemberCountry.ts
 models/MemberCredit.ts
 models/MemberCreditCreateRequest.ts
 models/MemberCreditSettleRequest.ts
+models/MemberDataDisclosure.ts
+models/MemberDataField.ts
+models/MemberDataLogOverview.ts
+models/MemberDataMailOverview.ts
+models/MemberDataMember.ts
+models/MemberDataSection.ts
 models/MemberDataToConfirm.ts
 models/MemberEmailRequestRequest.ts
 models/MemberEmailResponse.ts
