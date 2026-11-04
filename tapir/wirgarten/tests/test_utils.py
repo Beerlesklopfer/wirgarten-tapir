@@ -8,7 +8,10 @@ from django.core.cache import cache
 from django.test import TestCase, Client, SimpleTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
-from tapir_mail.triggers.transactional_trigger import TransactionalTriggerData
+from tapir_mail.triggers.transactional_trigger import (
+    TransactionalTrigger,
+    TransactionalTriggerData,
+)
 
 from tapir.utils.shortcuts import get_monday, get_next_sunday
 from tapir.wirgarten.tapirmail import configure_mail_module
@@ -29,12 +32,15 @@ class TapirFactoryMixin:
 
 
 @override_settings(
+    # This disables the ManifestStaticFilesStorage from the settings: with the manifest storage, collectstatic must be run before tests can work
     STORAGES={
         **settings.STORAGES,
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
         },
-    }
+    },
+    # This skips the WhiteNoise scan of all static files each time a test client starts, speeding up tests.
+    WHITENOISE_AUTOREFRESH=True,
 )
 class TapirIntegrationTest(TapirFactoryMixin, TestCase):
     def setUp(self) -> None:
@@ -78,6 +84,11 @@ class TapirIntegrationTest(TapirFactoryMixin, TestCase):
         for call in mock_fire_action.mock_calls:
             trigger_data: TransactionalTriggerData = call.kwargs["trigger_data"]
             if trigger_data.key == key:
+                self.assertEqual(
+                    set(TransactionalTrigger.trigger_tokens.get(key, {}).values()),
+                    set(trigger_data.token_data.keys()),
+                    f"Token data doesn't match the tokens registered for {key}",
+                )
                 return
 
         self.fail(

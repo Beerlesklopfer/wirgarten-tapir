@@ -35,7 +35,8 @@ if (domNodeDeliveryListCard) {
         domNodeDeliveryListCard.dataset
           .membersCanChangePickupLocationThemselves === "true"
       }
-      adminContactEmail={domNodeDeliveryListCard.dataset.adminContactEmail!}
+      contactEmail={domNodeDeliveryListCard.dataset.contactEmail!}
+      pickupLocationLabel={domNodeDeliveryListCard.dataset.pickupLocationLabel!}
       csrfToken={getCsrfToken()}
     />,
   );
@@ -76,7 +77,7 @@ if (domNodeWaitingListCard) {
   root.render(
     <MemberProfileWaitingListCard
       memberId={domNodeWaitingListCard.dataset.memberId!}
-      adminEmail={domNodeWaitingListCard.dataset.adminEmail!}
+      contactEmail={domNodeWaitingListCard.dataset.contactEmail!}
     />,
   );
 } else {
@@ -92,7 +93,7 @@ if (domNodeSolidarityCard) {
   root.render(
     <MemberProfileSolidarityContributionCard
       memberId={domNodeSolidarityCard.dataset.memberId!}
-      adminEmail={domNodeSolidarityCard.dataset.adminEmail!}
+      contactEmail={domNodeSolidarityCard.dataset.contactEmail!}
       adminVersion={domNodeSolidarityCard.dataset.userIsAdmin === "True"}
       membersCanChangeContribution={
         domNodeSolidarityCard.dataset.membersCanChangeContribution === "True"
