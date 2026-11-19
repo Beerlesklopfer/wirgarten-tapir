@@ -2,13 +2,17 @@
 .git
 .venv
 venv
+.idea
 node_modules
 .pnpm-store
 .vite
 .pytest_cache
 build-deb
 docs
+media
 static
+error_logs
+emails_from_celery
 **/__pycache__
 *.tsbuildinfo
 .env.local

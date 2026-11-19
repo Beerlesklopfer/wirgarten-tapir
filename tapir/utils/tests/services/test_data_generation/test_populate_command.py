@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.test import override_settings
 
 from tapir.utils.config import Organization
 from tapir.utils.services.test_data_generation.data_generator import DataGenerator
@@ -29,10 +30,8 @@ class TestPopulateCommand(TapirIntegrationTest):
     def test_resetAll_unknownOrganization_raisesCommandErrorListingTheValidOnes(
         self, _clear, _generate_all
     ):
-        with self.assertRaises(CommandError) as context:
+        with self.assertRaisesMessage(CommandError, "BIOTOP"):
             call_command("populate", "--reset_all", "--org", "nope")
-
-        self.assertIn("BIOTOP", str(context.exception))
 
     def test_resetAll_withoutBakeryOrg_doesNotGenerateBakeryData(
         self, _clear, mock_generate_all
@@ -41,10 +40,21 @@ class TestPopulateCommand(TapirIntegrationTest):
 
         self.assertNotEqual(mock_generate_all.call_args.args[0], Organization.BAKERY)
 
+    @override_settings(BAKERY_ENABLED=True)
     def test_resetAll_orgBakery_generatesBakeryData(self, _clear, mock_generate_all):
         call_command("populate", "--reset_all", "--org", "bakery")
 
         self.assertEqual(mock_generate_all.call_args.args[0], Organization.BAKERY)
+
+    @override_settings(BAKERY_ENABLED=False)
+    def test_resetAll_orgBakeryWhileBakeryDisabled_raisesBeforeClearing(
+        self, mock_clear, mock_generate_all
+    ):
+        with self.assertRaises(CommandError):
+            call_command("populate", "--reset_all", "--org", "bakery")
+
+        mock_clear.assert_not_called()
+        mock_generate_all.assert_not_called()
 
     def test_clear_doesNotGenerateAnything(self, mock_clear, mock_generate_all):
         call_command("populate", "--clear")

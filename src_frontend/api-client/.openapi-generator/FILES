@@ -1,3 +1,4 @@
+apis/AccountsApi.ts
 apis/AssociationsApi.ts
 apis/BakeryApi.ts
 apis/BestellWizardApi.ts
@@ -44,6 +45,8 @@ models/BreadContent.ts
 models/BreadContentRequest.ts
 models/BreadDelivery.ts
 models/BreadDetail.ts
+models/BreadGroup.ts
+models/BreadGroupRequest.ts
 models/BreadLabel.ts
 models/BreadLabelRequest.ts
 models/BreadList.ts
@@ -53,6 +56,7 @@ models/BreadSpecificsPerDeliveryDayBulkUpdateItemRequest.ts
 models/BreadSpecificsPerDeliveryDayBulkUpdateRequest.ts
 models/BreadSpecificsPerDeliveryDayRequest.ts
 models/BreadsPerPickupLocationPerWeek.ts
+models/BreadsToBakePerWeek.ts
 models/BuildCsvExportResponse.ts
 models/BundledEmailConfiguration.ts
 models/BundledEmailConfigurationRequest.ts
@@ -60,6 +64,7 @@ models/CabLoggedInUserChangeTargetsPaymentRhythmResponse.ts
 models/CancelSubscriptionsRequestRequest.ts
 models/CancelSubscriptionsViewResponse.ts
 models/CancellationData.ts
+models/ChangeMemberPickupLocationRequestRequest.ts
 models/ChangeTypeEnum.ts
 models/ConfirmSubscriptionChangesRequestRequest.ts
 models/ConvertWeekToDateForSubscriptionChangesResponse.ts
@@ -72,6 +77,8 @@ models/CsvExportModelRequest.ts
 models/CustomCycleDeliveryWeeksRequest.ts
 models/DayOfWeekEnum.ts
 models/Delivery.ts
+models/DeliveryAddressRequest.ts
+models/DeliveryCountryEnum.ts
 models/DeliveryCycleEnum.ts
 models/DeliveryDayAdjustment.ts
 models/DeliveryDayAdjustmentRequest.ts
@@ -116,6 +123,7 @@ models/Joker.ts
 models/JokerCreditIntendedUsePreviewResponse.ts
 models/JokerRestriction.ts
 models/JokerWithCancellationLimit.ts
+models/Land.ts
 models/LegalStatusEnum.ts
 models/LevelEnum.ts
 models/LocaleEnum.ts
@@ -125,7 +133,10 @@ models/LocationRouteRequest.ts
 models/MailCategory.ts
 models/MailCategoryRequest.ts
 models/MailingList.ts
+models/MailingListAdmin.ts
 models/MailingListCreateRequest.ts
+models/MailingListHeldMessage.ts
+models/MailingListModerateHeldMessageRequestRequest.ts
 models/MailingListRecipient.ts
 models/MailingListSubscribeExternalRecipientRequestRequest.ts
 models/MailingListSubscribeInternalRecipientRequestRequest.ts
@@ -133,7 +144,6 @@ models/MandateReferencePreviewResponse.ts
 models/Member.ts
 models/MemberAssociationMembershipDetails.ts
 models/MemberBankDataResponse.ts
-models/MemberCountry.ts
 models/MemberCredit.ts
 models/MemberCreditCreateRequest.ts
 models/MemberCreditSettleRequest.ts
@@ -144,6 +154,8 @@ models/MemberDataMailOverview.ts
 models/MemberDataMember.ts
 models/MemberDataSection.ts
 models/MemberDataToConfirm.ts
+models/MemberDeliveryAddress.ts
+models/MemberDeliveryCountry.ts
 models/MemberEmailRequestRequest.ts
 models/MemberEmailResponse.ts
 models/MemberExtraEmail.ts
@@ -163,6 +175,7 @@ models/MemberSubscriptionData.ts
 models/MinimumNumberOfSharesResponse.ts
 models/MissingTrigger.ts
 models/ModeEnum.ts
+models/ModerationActionEnum.ts
 models/Mpl.ts
 models/NoticePeriodUnitEnum.ts
 models/NumberOfAssociationMembersPerMonthResponse.ts
@@ -175,12 +188,16 @@ models/PaginatedEmailDispatchList.ts
 models/PaginatedEmailDispatchWithRetriesList.ts
 models/PaginatedEmailTemplateList.ts
 models/PaginatedGroupedEmailDispatchList.ts
+models/PaginatedPaymentExportExclusionPeriodOverviewList.ts
 models/PaginatedPaymentTransactionList.ts
+models/PaginatedStoredUploadList.ts
+models/PaginatedTemporaryUploadList.ts
 models/PaginatedWaitingListEntryDetailsList.ts
 models/PatchedAssociationMembershipTypePriceRequest.ts
 models/PatchedAssociationMembershipTypeRequest.ts
 models/PatchedBreadContentRequest.ts
 models/PatchedBreadDeliveryRequest.ts
+models/PatchedBreadGroupRequest.ts
 models/PatchedBreadLabelRequest.ts
 models/PatchedBreadListRequest.ts
 models/PatchedBreadSpecificsPerDeliveryDayRequest.ts
@@ -207,6 +224,10 @@ models/PatchedTemporaryUploadRequest.ts
 models/PatchedUpdateMemberBankDataRequestRequest.ts
 models/PatchedWaitingListEntryRequest.ts
 models/Payment.ts
+models/PaymentExportExclusionPeriod.ts
+models/PaymentExportExclusionPeriodCreateRequestRequest.ts
+models/PaymentExportExclusionPeriodOverview.ts
+models/PaymentExportExclusionPeriodUpdateRequestRequest.ts
 models/PaymentIntendedUsePreviewResponse.ts
 models/PaymentList.ts
 models/PaymentRhythmSerializerRequest.ts
@@ -234,6 +255,8 @@ models/PickupLocationDeliveryChargeEntry.ts
 models/PickupLocationDeliveryChargesResponse.ts
 models/PickupLocationDeliveryDay.ts
 models/PickupLocationOpeningTime.ts
+models/PickupLocationOpeningTimeInputRequest.ts
+models/PickupLocationSaveRequestRequest.ts
 models/PickupLocationsByDeliveryDayResponse.ts
 models/PreferenceSatisfactionResponse.ts
 models/PreferredBread.ts
@@ -242,6 +265,8 @@ models/PreferredBreadStatistics.ts
 models/PreferredBreadsBulkUpdate.ts
 models/PreferredBreadsBulkUpdateRequest.ts
 models/PreferredLanguageEnum.ts
+models/PreviewRequest.ts
+models/PreviewResponse.ts
 models/Product.ts
 models/ProductBasketSizeEquivalence.ts
 models/ProductBasketSizeEquivalenceRequest.ts
@@ -265,7 +290,9 @@ models/RhythmEnum.ts
 models/SaveExtendedProductTypeRequest.ts
 models/SegmentData.ts
 models/SegmentDataRequest.ts
+models/SegmentOption.ts
 models/SendLinkSerializerRequest.ts
+models/SendVerificationEmailsResponse.ts
 models/SetAssociationMembershipEndDateRequestRequest.ts
 models/SolidarityContribution.ts
 models/SolidarityContributionCancellationData.ts
@@ -286,6 +313,7 @@ models/StaticSegment.ts
 models/StaticSegmentRecipient.ts
 models/StaticSegmentRecipientRequest.ts
 models/StaticSegmentRequest.ts
+models/StoredDeliveryAddress.ts
 models/StoredUpload.ts
 models/StoredUploadRequest.ts
 models/StoveSession.ts
@@ -298,6 +326,7 @@ models/SubscriptionTrialChangeRequestRequest.ts
 models/SubscriptionTrialFields.ts
 models/TapirmailApiSegmentCombineCreate200Response.ts
 models/TapirmailApiSegmentCombineCreate200ResponseRecipientsInner.ts
+models/TemplateTypeEnum.ts
 models/TemporaryUpload.ts
 models/TemporaryUploadRequest.ts
 models/ToggleBreadRequestRequest.ts
@@ -307,6 +336,9 @@ models/TriggerData.ts
 models/TriggerDataRequest.ts
 models/TriggerDefinition.ts
 models/TriggerFieldDefinition.ts
+models/TypeEnum.ts
+models/UnverifiedMember.ts
+models/UnverifiedMembersResponse.ts
 models/UpdateMemberSolidarityContributionRequestRequest.ts
 models/UpdateMemberSolidarityContributionResponse.ts
 models/UpdateSubscriptionsRequestRequest.ts

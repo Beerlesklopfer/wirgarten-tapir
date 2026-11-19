@@ -5,6 +5,9 @@ from tapir.deliveries.services.date_limit_for_delivery_change_calculator import 
     DateLimitForDeliveryChangeCalculator,
 )
 from tapir.subscriptions.services.notice_period_manager import NoticePeriodManager
+from tapir.subscriptions.services.subscribed_products_service import (
+    SubscribedProductsService,
+)
 from tapir.subscriptions.services.subscription_cancellation_manager import (
     SubscriptionCancellationManager,
 )
@@ -16,7 +19,7 @@ from tapir.wirgarten.models import (
 )
 from tapir.wirgarten.parameter_keys import ParameterKeys
 from tapir.wirgarten.service.get_next_delivery_date import get_next_delivery_date
-from tapir.wirgarten.service.products import get_active_and_future_subscriptions
+from tapir.wirgarten.service.products import get_next_growing_period
 from tapir.wirgarten.utils import get_today
 
 
@@ -27,7 +30,7 @@ class ProductCancellationDataBuilder:
             cls.build_data_for_a_single_product(
                 member=member, product=subscribed_product, cache=cache
             )
-            for subscribed_product in cls.get_subscribed_products(
+            for subscribed_product in SubscribedProductsService.get_subscribed_products(
                 member=member, cache=cache
             )
         ]
@@ -36,30 +39,75 @@ class ProductCancellationDataBuilder:
     def build_data_for_a_single_product(
         cls, member: Member, product: Product, cache: dict
     ):
+        # Different cases must be handled:
+        # Trial period ongoing or not
+        # Notice period is in the past (= contract already renewed) or not
+        # Also, is the end of the trial period after the end of the notice period
+
         product_subscriptions = list(
-            cls.get_relevant_subscriptions(member=member, cache=cache)
+            SubscribedProductsService.get_relevant_subscriptions(
+                member=member, cache=cache
+            )
             .filter(product=product)
             .order_by("end_date")
         )
 
+        is_in_trial = TrialPeriodManager.is_product_in_trial(
+            product, member, cache=cache
+        )
+        cancellation_date = SubscriptionCancellationManager.get_earliest_possible_cancellation_date_for_product(
+            product=product, member=member, cache=cache
+        )
+        last_subscription_end_date = product_subscriptions[-1].end_date
+        date_limit_for_trial_cancellation = cls.get_date_limit_for_trial_cancellation(
+            product_subscriptions=product_subscriptions, cache=cache
+        )
+        last_day_to_give_notice = cls.get_last_day_to_give_notice_for_product(
+            product_subscriptions=product_subscriptions, cache=cache
+        )
+
         return {
             "product": product,
-            "is_in_trial": TrialPeriodManager.is_product_in_trial(
-                product, member, cache=cache
-            ),
-            "date_limit_for_trial_cancellation": cls.get_date_limit_for_trial_cancellation(
-                product_subscriptions=product_subscriptions, cache=cache
-            ),
-            "cancellation_date": SubscriptionCancellationManager.get_earliest_possible_cancellation_date_for_product(
-                product=product, member=member, cache=cache
-            ),
-            "last_day_of_notice_period": cls.get_last_day_of_notice_period_for_product(
-                product_subscriptions=product_subscriptions, cache=cache
-            ),
+            "is_in_trial": is_in_trial,
+            "date_limit_for_trial_cancellation": date_limit_for_trial_cancellation,
+            "cancellation_date": cancellation_date,
+            "last_day_to_give_notice": last_day_to_give_notice,
             "notice_period_duration": product_subscriptions[-1].notice_period_duration,
             "notice_period_unit": product_subscriptions[-1].notice_period_unit,
-            "subscription_end_date": product_subscriptions[-1].end_date,
+            "post_trial_subscription_end_date": cls.get_post_trial_subscription_end_date(
+                is_in_trial=is_in_trial,
+                last_day_to_give_notice=last_day_to_give_notice,
+                date_limit_for_trial_cancellation=date_limit_for_trial_cancellation,
+                last_subscription_end_date=last_subscription_end_date,
+                cache=cache,
+            ),
         }
+
+    @classmethod
+    def get_post_trial_subscription_end_date(
+        cls,
+        is_in_trial: bool,
+        last_day_to_give_notice: datetime.date,
+        date_limit_for_trial_cancellation: datetime.date,
+        last_subscription_end_date: datetime.date,
+        cache: dict,
+    ) -> datetime.date:
+        if (
+            not is_in_trial
+            or last_day_to_give_notice > date_limit_for_trial_cancellation
+        ):
+            return last_subscription_end_date
+
+        # This is for the case where the trial ends for example during December,
+        # but the contracts get renewed on the first of December
+        next_period = get_next_growing_period(
+            reference_date=last_subscription_end_date, cache=cache
+        )
+        return (
+            next_period.end_date
+            if next_period is not None
+            else last_subscription_end_date
+        )
 
     @classmethod
     def get_date_limit_for_trial_cancellation(
@@ -93,17 +141,12 @@ class ProductCancellationDataBuilder:
             )
             for subscription in product_subscriptions
         ]
+        last_days_of_trial = [day for day in last_days_of_trial if day is not None]
 
-        if all(day is None for day in last_days_of_trial):
-            return None
-
-        end_of_trial_period = min(last_days_of_trial)
-        return DateLimitForDeliveryChangeCalculator.calculate_date_limit_for_delivery_changes_in_week(
-            end_of_trial_period, cache=cache
-        )
+        return min(last_days_of_trial, default=None)
 
     @classmethod
-    def get_last_day_of_notice_period_for_product(
+    def get_last_day_to_give_notice_for_product(
         cls, product_subscriptions: list[Subscription], cache: dict
     ):
         return max(
@@ -111,19 +154,4 @@ class ProductCancellationDataBuilder:
                 subscription=subscription, cache=cache
             )
             for subscription in product_subscriptions
-        )
-
-    @classmethod
-    def get_subscribed_products(cls, member: Member, cache: dict):
-        return {
-            subscription.product
-            for subscription in cls.get_relevant_subscriptions(
-                member=member, cache=cache
-            ).select_related("product")
-        }
-
-    @classmethod
-    def get_relevant_subscriptions(cls, member: Member, cache: dict):
-        return get_active_and_future_subscriptions(cache=cache).filter(
-            member=member, cancellation_ts__isnull=True
         )

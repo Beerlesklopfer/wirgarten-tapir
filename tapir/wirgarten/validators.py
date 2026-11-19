@@ -3,6 +3,7 @@ import io
 import re
 
 from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
 from django.utils.translation import gettext_lazy as _
 from lxml import etree
 
@@ -104,7 +105,7 @@ def validate_base_product_type_exists(base_product_type_id: str):
 
     if not ProductType.objects.filter(id=base_product_type_id).exists():
         raise ValidationError(
-            f"Ungültige ProduktTyp ID ({base_product_type_id}). Versuche die Seite neue zu laden. Wenn das Problem wieder auftaucht, kontaktiere bitte ein Admin."
+            f"Ungültige ProduktTyp ID ({base_product_type_id}). Versuche die Seite neue zu laden. Wenn das Problem wieder auftaucht, wende dich bitte an die Verwaltung."
         )
 
 
@@ -113,3 +114,9 @@ def validate_date_is_first_of_month(date: datetime.date):
         raise ValidationError(
             f"Ungültiges Datum: {format_date(date)}, nur Monatserste sind erlaubt."
         )
+
+
+def validate_optional_url(value: str):
+    if value == "":
+        return
+    URLValidator()(value)

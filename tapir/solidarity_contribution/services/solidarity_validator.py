@@ -1,8 +1,11 @@
 import datetime
+import math
 from decimal import Decimal
+from typing import Iterable
 
 from django.core.exceptions import ValidationError
 
+from tapir.accounts.models import TapirUser
 from tapir.configuration.parameter import get_parameter_value
 from tapir.core.exceptions import TapirImproperlyConfigured
 from tapir.subscriptions import config
@@ -13,6 +16,10 @@ from tapir.subscriptions.config import (
 from tapir.subscriptions.services.automatic_solidarity_contribution_renewal_service import (
     AutomaticSolidarityContributionRenewalService,
 )
+from tapir.subscriptions.types import TapirOrder
+from tapir.utils.services.tapir_cache import TapirCache
+from tapir.wirgarten.constants import Permission
+from tapir.wirgarten.models import Product
 from tapir.wirgarten.parameter_keys import ParameterKeys
 
 
@@ -22,10 +29,21 @@ class SolidarityValidator:
         cls,
         amount: float,
         start_date: datetime.date,
+        order: TapirOrder,
         cache: dict,
     ) -> bool:
+        product_minimum = cls.get_product_solidarity_minimum(order.keys())
+        if product_minimum is not None and amount < product_minimum:
+            return False
+
         if amount >= 0:
             return True
+
+        minimum = cls.get_solidarity_contribution_minimum(
+            reference_date=start_date, cache=cache
+        )
+        if amount < minimum:
+            return False
 
         solidarity_mode = get_parameter_value(
             key=ParameterKeys.HARVEST_NEGATIVE_SOLIPRICE_ENABLED, cache=cache
@@ -63,16 +81,20 @@ class SolidarityValidator:
     @classmethod
     def get_solidarity_contribution_minimum(
         cls, reference_date: datetime.date, cache: dict
-    ) -> float | None:
+    ) -> float:
         enabled = get_parameter_value(
             key=ParameterKeys.HARVEST_NEGATIVE_SOLIPRICE_ENABLED, cache=cache
         )
-        if enabled == SOLIDARITY_MODE_NEGATIVE_ALWAYS_ALLOWED:
-            return None
         if enabled == SOLIDARITY_MODE_ONLY_POSITIVE:
             return 0.0
 
-        return min(
+        configured_minimum = float(
+            get_parameter_value(key=ParameterKeys.SOLIDARITY_MINIMUM, cache=cache)
+        )
+        if enabled == SOLIDARITY_MODE_NEGATIVE_ALWAYS_ALLOWED:
+            return configured_minimum
+
+        minimum_from_solidarity_excess = min(
             0.0,
             -float(
                 cls.get_solidarity_excess(
@@ -80,23 +102,18 @@ class SolidarityValidator:
                 ).quantize(Decimal("0.01"))
             ),
         )
+        return max(configured_minimum, minimum_from_solidarity_excess)
 
     @classmethod
     def get_solidarity_dropdown_values(
-        cls, parameter_value: str = None, cache: dict = None
+        cls, parameter_value: str | None = None, cache: dict | None = None
     ):
         if parameter_value is None:
             parameter_value = get_parameter_value(
                 ParameterKeys.SOLIDARITY_CHOICES, cache=cache
             )
 
-        if parameter_value.strip() == "":
-            values = []
-        else:
-            values_as_string = parameter_value.split(",")
-            values: list[float | str] = [
-                float(value.strip()) for value in values_as_string
-            ]
+        values: list[float | str] = cls.parse_solidarity_choices(parameter_value)
 
         if 0 not in values:
             values.append(0)
@@ -105,6 +122,66 @@ class SolidarityValidator:
             values.append("custom")
 
         return {value: cls.get_value_display(value=value) for value in values}
+
+    @classmethod
+    def parse_solidarity_choices(cls, value: str) -> list[float]:
+        if value.strip() == "":
+            return []
+        choices = [float(choice.strip()) for choice in value.split(",")]
+        for choice in choices:
+            if not math.isfinite(choice):
+                # Filters out values like inf or NaN
+                raise ValueError(f"'{choice}' ist keine gültige Zahl")
+        return choices
+
+    @classmethod
+    def get_product_solidarity_choices(cls, products: Iterable[Product]) -> set[float]:
+        choices = set()
+        for product in products:
+            choices.update(cls.parse_solidarity_choices(product.solidarity_choices))
+        return choices
+
+    @classmethod
+    def get_product_solidarity_minimum(
+        cls, products: Iterable[Product]
+    ) -> float | None:
+        choices = cls.get_product_solidarity_choices(products)
+        if len(choices) == 0:
+            return None
+        return min(choices)
+
+    @classmethod
+    def get_product_solidarity_minimum_for_member(
+        cls, member_id: str, reference_date: datetime.date, cache: dict
+    ) -> float | None:
+        products = {
+            subscription.product
+            for subscription in TapirCache.get_all_subscriptions_for_member(
+                member_id=member_id, cache=cache
+            )
+            if subscription.end_date >= reference_date
+        }
+        return cls.get_product_solidarity_minimum(products)
+
+    @classmethod
+    def get_violated_product_minimum(
+        cls,
+        logged_in_user: TapirUser,
+        target_member_id: str,
+        new_amount: Decimal,
+        change_date: datetime.date,
+        cache: dict,
+    ) -> float | None:
+        if logged_in_user.has_perm(Permission.Coop.MANAGE):
+            return None
+
+        minimum = cls.get_product_solidarity_minimum_for_member(
+            member_id=target_member_id, reference_date=change_date, cache=cache
+        )
+        if minimum is None or new_amount >= Decimal(str(minimum)):
+            return None
+
+        return minimum
 
     @classmethod
     def get_value_display(cls, value):

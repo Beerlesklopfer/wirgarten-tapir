@@ -2,11 +2,14 @@ import React from "react";
 import { Badge } from "react-bootstrap";
 import { ExtendedPayment, Payment } from "../../api-client";
 import TapirHelpButton from "../../components/TapirHelpButton.tsx";
+import { toApiDate } from "../../utils/apiDate.ts";
+import { formatCoopShareLabel } from "../../utils/formatCoopShareLabel.ts";
 import { formatCurrency } from "../../utils/formatCurrency.ts";
 import { formatDateNumeric } from "../../utils/formatDateNumeric.ts";
 import formatSubscription from "../../utils/formatSubscription.ts";
 import { getMaximumDate } from "../../utils/getMaximumDate.ts";
 import { getMinimumDate } from "../../utils/getMinimumDate.ts";
+import CalculationExplanation from "./CalculationExplanation.tsx";
 
 interface PaymentProps {
   extendedPayment: ExtendedPayment;
@@ -46,7 +49,7 @@ function getEndDate(extendedPayment: ExtendedPayment) {
   const paymentRangeEnd = extendedPayment.payment.subscriptionPaymentRangeEnd;
 
   const subscriptionEndDates = extendedPayment.subscriptions.map(
-    (subscription) => subscription.endDate ?? new Date("9999-12-31"),
+    (subscription) => subscription.endDate ?? "9999-12-31",
   );
 
   const contributionEndDates = extendedPayment.solidarityContributions.map(
@@ -54,7 +57,7 @@ function getEndDate(extendedPayment: ExtendedPayment) {
   );
 
   const membershipEndDates = extendedPayment.associationMemberships.map(
-    (membership) => membership.endDate ?? new Date("9999-12-31"),
+    (membership) => membership.endDate ?? "9999-12-31",
   );
 
   const candidates = [
@@ -104,7 +107,7 @@ function trialPeriodText(
 }
 
 function getBadgeBackground(payment: Payment) {
-  if (payment.dueDate > new Date()) {
+  if (payment.dueDate > toApiDate(new Date())) {
     return "info";
   }
 
@@ -119,18 +122,18 @@ function getBadgeBackground(payment: Payment) {
 }
 
 function getBadgeText(payment: Payment) {
-  if (payment.dueDate > new Date()) {
+  if (payment.dueDate > toApiDate(new Date())) {
     return "UPCOMING";
   }
 
   return payment.status;
 }
 
-function buildDeliveries(deliveryDates: Date[]) {
+function buildDeliveries(deliveryDates: string[]) {
   if (deliveryDates.length < 6) {
     return deliveryDates
       .toSorted()
-      .map((deliveryDate) => formatDateNumeric(new Date(deliveryDate)))
+      .map((deliveryDate) => formatDateNumeric(deliveryDate))
       .join(", ");
   }
 
@@ -140,7 +143,7 @@ function buildDeliveries(deliveryDates: Date[]) {
       title={"Liefertage"}
       text={deliveryDates
         .toSorted()
-        .map((deliveryDate) => formatDateNumeric(new Date(deliveryDate)))
+        .map((deliveryDate) => formatDateNumeric(deliveryDate))
         .join(", ")}
     />
   );
@@ -154,7 +157,9 @@ const PaymentComponent: React.FC<PaymentProps> = ({
     <div key={extendedPayment.payment.id}>
       <div className={"d-flex flex-column align-items-center"}>
         <strong>{formatCurrency(extendedPayment.payment.amount)}</strong>
-        <span>{extendedPayment.payment.mandateRef}</span>
+        <span className={"text-break"}>
+          {extendedPayment.payment.mandateRef}
+        </span>
         {extendedPayment.subscriptions.map((subscription) => (
           <span key={subscription.id}>
             {formatSubscription(subscription)}
@@ -165,7 +170,13 @@ const PaymentComponent: React.FC<PaymentProps> = ({
         {extendedPayment.coopShareTransactions.map((transaction) => (
           <span key={transaction.id}>
             {transaction.quantity}
-            {" × Genossenschaftsanteile"}
+            {" × " + formatCoopShareLabel(transaction.quantity)}
+            {extendedPayment.payment.instalmentNumber &&
+              extendedPayment.numberOfInstalments &&
+              ", Rate " +
+                extendedPayment.payment.instalmentNumber +
+                " von " +
+                extendedPayment.numberOfInstalments}
           </span>
         ))}
         {extendedPayment.solidarityContributions.length > 0 && (
@@ -216,9 +227,15 @@ const PaymentComponent: React.FC<PaymentProps> = ({
             {formatDateNumeric(getEndDate(extendedPayment))}
           </span>
         )}
+        {extendedPayment.excludedFromExport && (
+          <span className={"fst-italic"}>Kein Einzug per Lastschrift</span>
+        )}
         <Badge bg={getBadgeBackground(extendedPayment.payment)}>
           {getBadgeText(extendedPayment.payment)}
         </Badge>
+        <CalculationExplanation
+          text={extendedPayment.payment.calculationExplanation}
+        />
       </div>
     </div>
   );

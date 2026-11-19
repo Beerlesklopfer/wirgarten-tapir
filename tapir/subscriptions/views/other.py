@@ -20,8 +20,12 @@ from tapir.products.serializers import (
     PublicProductTypeSerializer,
     ProductSerializer,
 )
+from tapir.solidarity_contribution.services.solidarity_validator import (
+    SolidarityValidator,
+)
 from tapir.subscriptions.models import (
     SubscriptionPriceChangedLogEntry,
+    SubscriptionTrialChangedLogEntry,
 )
 from tapir.subscriptions.serializers import (
     OrderConfirmationResponseSerializer,
@@ -74,6 +78,7 @@ class ExtendedProductView(APIView):
                 "capacity",
                 "min_coop_shares",
                 "hidden_in_bestell_wizard",
+                "solidarity_choices",
             ]
         }
 
@@ -120,6 +125,13 @@ class ExtendedProductView(APIView):
 
         request_serializer = ExtendedProductSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
+
+        try:
+            SolidarityValidator.validate_solidarity_dropdown_values(
+                request_serializer.validated_data["solidarity_choices"]
+            )
+        except ValidationError as error:
+            return Response(data=error.message, status=status.HTTP_400_BAD_REQUEST)
 
         product = get_object_or_404(Product, id=request_serializer.validated_data["id"])
 
@@ -366,10 +378,21 @@ class SubscriptionTrialChangeApiView(APIView):
         if trial_disabled:
             trial_end_date_override = None
 
+        trial_disabled_before = subscription.trial_disabled
+        trial_end_date_override_before = subscription.trial_end_date_override
+
         with transaction.atomic():
             subscription.trial_disabled = trial_disabled
             subscription.trial_end_date_override = trial_end_date_override
             subscription.save()
+
+            SubscriptionTrialChangedLogEntry().populate_trial_change(
+                subscription=subscription,
+                trial_disabled_before=trial_disabled_before,
+                trial_end_date_override_before=trial_end_date_override_before,
+                actor=request.user,
+                user=subscription.member,
+            ).save()
 
         return Response(
             OrderConfirmationResponseSerializer(

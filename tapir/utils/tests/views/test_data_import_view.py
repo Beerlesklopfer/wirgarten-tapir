@@ -1,6 +1,7 @@
 import io
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.urls import reverse
 from openpyxl import Workbook
 from rest_framework import status
@@ -22,6 +23,11 @@ def members_excel() -> SimpleUploadedFile:
     return SimpleUploadedFile("Mitglieder.xlsx", buffer.getvalue())
 
 
+# The checked upload waits in the cache between upload and apply. Under xdist all workers
+# share one Redis, and every other worker's setUp runs cache.clear() on it.
+@override_settings(
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+)
 class TestDataImportView(TapirIntegrationTest):
     @classmethod
     def setUpTestData(cls):

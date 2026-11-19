@@ -3,6 +3,7 @@ import { Modal } from "react-bootstrap";
 import { PlusLg, Trash, XLg } from "react-bootstrap-icons";
 import { BakeryApi } from "../../../api-client";
 import type {
+  BreadGroup,
   BreadLabel,
   BreadList,
   BreadListRequest,
@@ -38,14 +39,17 @@ export const BreadModal: React.FC<BreadModalProps> = ({
     minPieces: undefined,
     maxPieces: undefined,
     minRemainingPieces: undefined,
+    group: null,
   });
   const [availableLabels, setAvailableLabels] = useState<BreadLabel[]>([]);
+  const [availableGroups, setAvailableGroups] = useState<BreadGroup[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [piecesInput, setPiecesInput] = useState("");
 
   useEffect(() => {
     loadLabels();
+    loadGroups();
     if (bread) {
       const labelIds = (bread.labels || []).map((label) =>
         typeof label === "object" ? (label as any).id : label,
@@ -63,9 +67,21 @@ export const BreadModal: React.FC<BreadModalProps> = ({
         minPieces: bread.minPieces,
         maxPieces: bread.maxPieces,
         minRemainingPieces: bread.minRemainingPieces,
+        group: bread.group ?? null,
       });
     }
   }, [bread]);
+
+  const loadGroups = () => {
+    bakeryApi
+      .bakeryBreadGroupsList()
+      .then((data) => {
+        setAvailableGroups(data);
+      })
+      .catch((error) => {
+        handleRequestError(error, "Fehler beim Laden der Gruppen");
+      });
+  };
 
   const loadLabels = () => {
     setLoading(true);
@@ -97,9 +113,9 @@ export const BreadModal: React.FC<BreadModalProps> = ({
   };
 
   const addPiecesPerLayer = () => {
-    const value = parseInt(piecesInput);
+    const value = Number.parseInt(piecesInput);
     if (
-      !isNaN(value) &&
+      !Number.isNaN(value) &&
       value > 0 &&
       !formData.piecesPerStoveLayer?.includes(value)
     ) {
@@ -224,9 +240,10 @@ export const BreadModal: React.FC<BreadModalProps> = ({
                     </small>
                     <div className="d-flex flex-wrap gap-2">
                       {assignedLabels.map((label) => (
-                        <span
+                        <button
+                          type="button"
                           key={label.id}
-                          className="badge badge-bakery-success"
+                          className="badge badge-bakery-success border-0"
                           style={{
                             cursor: "pointer",
                             fontSize: "0.75rem",
@@ -236,7 +253,7 @@ export const BreadModal: React.FC<BreadModalProps> = ({
                           title="Klicken zum Entfernen"
                         >
                           {label.name} <XLg size={10} />
-                        </span>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -249,9 +266,10 @@ export const BreadModal: React.FC<BreadModalProps> = ({
                     </small>
                     <div className="d-flex flex-wrap gap-2">
                       {unassignedLabels.map((label) => (
-                        <span
+                        <button
+                          type="button"
                           key={label.id}
-                          className="badge badge-bakery-muted"
+                          className="badge badge-bakery-muted border-0"
                           style={{
                             cursor: "pointer",
                             fontSize: "0.75rem",
@@ -261,7 +279,7 @@ export const BreadModal: React.FC<BreadModalProps> = ({
                           title="Klicken zum Hinzufügen"
                         >
                           {label.name} <PlusLg size={10} />
-                        </span>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -332,15 +350,17 @@ export const BreadModal: React.FC<BreadModalProps> = ({
                 </div>
                 <div className="d-flex flex-wrap gap-2">
                   {(formData.piecesPerStoveLayer || []).map((value: number) => (
-                    <span
+                    <button
+                      type="button"
                       key={value}
-                      className="badge bg-secondary"
+                      className="badge bg-secondary border-0"
                       style={{ fontSize: "0.85rem", cursor: "pointer" }}
                       onClick={() => removePiecesPerLayer(value)}
                       title="Klicken zum Entfernen"
+                      aria-label={`${value} entfernen`}
                     >
                       {value} <Trash size={12} className="ms-1" />
-                    </span>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -362,7 +382,7 @@ export const BreadModal: React.FC<BreadModalProps> = ({
                   className="form-check-label small"
                   htmlFor="oneBatchCanBeBakedInMoreThanOneStove"
                 >
-                  Ein Teig kann in mehreren Ofengängen gebacken werden
+                  Ein Teig kann in mehreren Ofengängen gebacken werden{" "}
                   <span
                     className="text-muted d-block"
                     style={{ fontSize: "0.75rem" }}
@@ -370,6 +390,41 @@ export const BreadModal: React.FC<BreadModalProps> = ({
                     (z.B. wenn der Teig zwischendurch gekühlt werden kann)
                   </span>
                 </label>
+              </div>
+
+              <div className="mb-3">
+                <label htmlFor="group" className="form-label fw-bold small">
+                  Gruppe
+                </label>
+                <span
+                  className="text-muted d-block"
+                  style={{ fontSize: "0.75rem", marginBottom: "0.5rem" }}
+                >
+                  Brote einer Gruppe (z.B. aus einem Teig) können zusammen auf
+                  einer Etage gebacken werden. Min. und Max. Stücke gelten dann
+                  für alle am Backtag verfügbaren Brote der Gruppe zusammen.
+                  Tageseinstellungen gelten dagegen nur für das einzelne Brot.
+                </span>
+                <select
+                  id="group"
+                  className="form-select form-select-sm"
+                  value={formData.group ?? ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, group: e.target.value || null })
+                  }
+                >
+                  <option value="">keine Gruppe</option>
+                  {availableGroups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+                {availableGroups.length === 0 && (
+                  <small className="text-muted">
+                    Gruppen werden in der Karte „Gruppen“ angelegt.
+                  </small>
+                )}
               </div>
 
               <div className="row">
@@ -390,7 +445,7 @@ export const BreadModal: React.FC<BreadModalProps> = ({
                         setFormData({
                           ...formData,
                           minPieces: e.target.value
-                            ? parseInt(e.target.value)
+                            ? Number.parseInt(e.target.value)
                             : undefined,
                         })
                       }
@@ -398,7 +453,9 @@ export const BreadModal: React.FC<BreadModalProps> = ({
                       placeholder="z.B. 10"
                     />
                     <small className="text-muted">
-                      Mindestanzahl pro Backtag
+                      {formData.group
+                        ? "Mindestanzahl der Gruppe pro Backtag"
+                        : "Mindestanzahl pro Backtag"}
                     </small>
                   </div>
                 </div>
@@ -420,7 +477,7 @@ export const BreadModal: React.FC<BreadModalProps> = ({
                         setFormData({
                           ...formData,
                           maxPieces: e.target.value
-                            ? parseInt(e.target.value)
+                            ? Number.parseInt(e.target.value)
                             : undefined,
                         })
                       }
@@ -428,7 +485,9 @@ export const BreadModal: React.FC<BreadModalProps> = ({
                       placeholder="z.B. 50"
                     />
                     <small className="text-muted">
-                      Maximalanzahl pro Backtag
+                      {formData.group
+                        ? "Maximalanzahl der Gruppe pro Backtag"
+                        : "Maximalanzahl pro Backtag"}
                     </small>
                   </div>
                 </div>
@@ -450,7 +509,7 @@ export const BreadModal: React.FC<BreadModalProps> = ({
                         setFormData({
                           ...formData,
                           minRemainingPieces: e.target.value
-                            ? parseInt(e.target.value)
+                            ? Number.parseInt(e.target.value)
                             : undefined,
                         })
                       }

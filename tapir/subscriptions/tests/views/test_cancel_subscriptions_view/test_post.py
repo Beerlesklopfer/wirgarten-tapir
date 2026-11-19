@@ -17,11 +17,13 @@ from tapir.configuration.models import TapirParameter
 from tapir.coop.services.coop_membership_cancellation_manager import (
     CoopMembershipCancellationManager,
 )
+from tapir.core.config import LEGAL_STATUS_ASSOCIATION
 from tapir.solidarity_contribution.models import SolidarityContribution
 from tapir.solidarity_contribution.tests.factories import SolidarityContributionFactory
 from tapir.subscriptions.services.subscription_cancellation_manager import (
     SubscriptionCancellationManager,
 )
+from tapir.subscriptions.views.cancellations import CancelSubscriptionsView
 from tapir.wirgarten.mail_events import Events
 from tapir.wirgarten.models import (
     SubscriptionChangeLogEntry,
@@ -296,11 +298,18 @@ class TestCancelSubscriptionsPostView(TapirIntegrationTest):
         )
         mock_cancel_subscriptions.assert_not_called()
 
+    @patch.object(
+        CancelSubscriptionsView,
+        "_build_last_pickup_date",
+        autospec=True,
+    )
     @patch.object(TransactionalTrigger, "fire_action", autospec=True)
     def test_post_default_sendsMailTriggerAndCreatesLogEntryAndSavesCancellationReasons(
         self,
         mock_fire_action: Mock,
+        mock_build_last_pickup_date: Mock,
     ):
+        mock_build_last_pickup_date.return_value = "01.04.2023"
         member = MemberFactory.create()
         self.client.force_login(member)
 
@@ -342,6 +351,7 @@ class TestCancelSubscriptionsPostView(TapirIntegrationTest):
                 token_data={
                     "contract_list": format_subscription_list_html(subscriptions[:2]),
                     "contract_end_date": format_date(growing_period.end_date),
+                    "last_pickup_date": "01.04.2023",
                 },
             )
         )
@@ -375,11 +385,18 @@ class TestCancelSubscriptionsPostView(TapirIntegrationTest):
             ).exists()
         )
 
+    @patch.object(
+        CancelSubscriptionsView,
+        "_build_last_pickup_date",
+        autospec=True,
+    )
     @patch.object(TransactionalTrigger, "fire_action", autospec=True)
     def test_post_aSubscriptionStartsInTheFuture_subscriptionIsIncludedInMailTriggerAndHasOwnLogEntry(
         self,
         mock_fire_action: Mock,
+        mock_build_last_pickup_date: Mock,
     ):
+        mock_build_last_pickup_date.return_value = "01.04.2023"
         member = MemberFactory.create()
         self.client.force_login(member)
 
@@ -417,11 +434,12 @@ class TestCancelSubscriptionsPostView(TapirIntegrationTest):
 
         mock_fire_action.assert_called_once_with(
             TransactionalTriggerData(
-                key=Events.CONTRACT_CANCELLED,
+                key=Events.TRIAL_CANCELLATION,
                 recipient_id_in_base_queryset=member.id,
                 token_data={
                     "contract_list": format_subscription_list_html(subscriptions[:2]),
                     "contract_end_date": format_date(growing_period.end_date),
+                    "last_pickup_date": "01.04.2023",
                 },
             )
         )
@@ -554,10 +572,16 @@ class TestCancelSubscriptionsPostView(TapirIntegrationTest):
         mock_fire_action.assert_not_called()
         mock_cancel_subscriptions.assert_not_called()
 
+    @patch.object(
+        CancelSubscriptionsView,
+        "_build_last_pickup_date",
+        autospec=True,
+    )
     @patch.object(TransactionalTrigger, "fire_action", autospec=True)
     def test_post_noCustomReasonSent_doesntCreateACustomObject(
-        self, mock_fire_action: Mock
+        self, mock_fire_action: Mock, mock_build_last_pickup_date: Mock
     ):
+        mock_build_last_pickup_date.return_value = "01.04.2023"
         member = MemberFactory.create()
         self.client.force_login(member)
 
@@ -599,6 +623,7 @@ class TestCancelSubscriptionsPostView(TapirIntegrationTest):
                 token_data={
                     "contract_list": format_subscription_list_html(subscriptions),
                     "contract_end_date": format_date(growing_period.end_date),
+                    "last_pickup_date": "01.04.2023",
                 },
             )
         )
@@ -685,11 +710,18 @@ class TestCancelSubscriptionsPostView(TapirIntegrationTest):
             datetime.date(year=2013, month=1, day=20), contribution.end_date
         )
 
+    @patch.object(
+        CancelSubscriptionsView,
+        "_build_last_pickup_date",
+        autospec=True,
+    )
     @patch.object(TransactionalTrigger, "fire_action", autospec=True)
     def test_post_severalSubscriptionsCancelledWithDifferentEndDates_mailTokenContainsMaxEndDate(
         self,
         mock_fire_action: Mock,
+        mock_build_last_pickup_date: Mock,
     ):
+        mock_build_last_pickup_date.return_value = "01.04.2023"
         member = MemberFactory.create()
         self.client.force_login(member)
 
@@ -703,6 +735,7 @@ class TestCancelSubscriptionsPostView(TapirIntegrationTest):
         future_subscription = SubscriptionFactory.create(
             member=member, period=future_growing_period
         )
+        self._set_parameter(key=ParameterKeys.TRIAL_PERIOD_ENABLED, value=False)
 
         TapirParameter.objects.filter(
             key=ParameterKeys.SUBSCRIPTION_AUTOMATIC_RENEWAL
@@ -731,6 +764,60 @@ class TestCancelSubscriptionsPostView(TapirIntegrationTest):
                         [subscription, future_subscription]
                     ),
                     "contract_end_date": format_date(future_subscription.end_date),
+                    "last_pickup_date": "01.04.2023",
+                },
+            )
+        )
+
+    @patch.object(
+        CancelSubscriptionsView,
+        "_build_last_pickup_date",
+        autospec=True,
+    )
+    @patch.object(TransactionalTrigger, "fire_action", autospec=True)
+    def test_post_subscriptionInTrial_sendsTrialCancellationMailTrigger(
+        self,
+        mock_fire_action: Mock,
+        mock_build_last_pickup_date: Mock,
+    ):
+        mock_build_last_pickup_date.return_value = "01.04.2023"
+        member = MemberFactory.create()
+        self.client.force_login(member)
+        self._set_parameter(key=ParameterKeys.TRIAL_PERIOD_ENABLED, value=True)
+        self._set_parameter(key=ParameterKeys.TRIAL_PERIOD_DURATION, value=8)
+        self._set_parameter(
+            key=ParameterKeys.TRIAL_PERIOD_CAN_BE_CANCELLED_BEFORE_END, value=False
+        )
+
+        growing_period = GrowingPeriodFactory.create(
+            start_date=TODAY.replace(month=1, day=1)
+        )
+        subscription = SubscriptionFactory.create(
+            member=member,
+            period=growing_period,
+            start_date=TODAY - datetime.timedelta(days=7),
+        )
+
+        response_content = self._post_cancellation(
+            member=member,
+            product_ids=[subscription.product_id],
+            cancel_association_membership=False,
+            cancel_solidarity_contribution=False,
+        )
+
+        self.assert_cancellation_confirmed(response_content)
+        subscription.refresh_from_db()
+        mock_build_last_pickup_date.assert_called_once_with(
+            ANY, member=member, contract_end_date=subscription.end_date
+        )
+        mock_fire_action.assert_called_once_with(
+            TransactionalTriggerData(
+                key=Events.TRIAL_CANCELLATION,
+                recipient_id_in_base_queryset=member.id,
+                token_data={
+                    "contract_list": format_subscription_list_html([subscription]),
+                    "contract_end_date": format_date(subscription.end_date),
+                    "last_pickup_date": "01.04.2023",
                 },
             )
         )
@@ -750,7 +837,9 @@ class TestCancelSubscriptionsPostView(TapirIntegrationTest):
         subscriptions = SubscriptionFactory.create_batch(
             size=3, member=member, period=period
         )
-        AssociationMembershipFactory.create(member=member, start_date=period.start_date)
+        AssociationMembershipFactory.create(
+            member=member, start_date=(self.now + datetime.timedelta(days=30)).date()
+        )
 
         post_data = {
             "member_id": member.id,
@@ -791,7 +880,9 @@ class TestCancelSubscriptionsPostView(TapirIntegrationTest):
         subscriptions = SubscriptionFactory.create_batch(
             size=3, member=member, period=period
         )
-        AssociationMembershipFactory.create(member=member, start_date=period.start_date)
+        AssociationMembershipFactory.create(
+            member=member, start_date=(self.now + datetime.timedelta(days=30)).date()
+        )
 
         post_data = {
             "member_id": member.id,
@@ -816,6 +907,260 @@ class TestCancelSubscriptionsPostView(TapirIntegrationTest):
         membership = AssociationMembership.objects.get()
         self.assertIsNone(membership.end_date)
         self.assertFalse(AssociationMembershipUpdatedLogEntry.objects.exists())
+
+    def test_post_allSubscriptionsCancelledAndSolidarityIsNegative_cancelsSolidarityContribution(
+        self,
+    ):
+        member = MemberFactory.create()
+        self.client.force_login(member)
+        self._enable_subscription_cancellation_outside_trial()
+        subscriptions = self._create_subscriptions(member=member, size=2)
+        self._create_solidarity_contribution(member=member, amount=Decimal("-5"))
+
+        response_content = self._post_cancellation(
+            member=member,
+            product_ids=[subscription.product_id for subscription in subscriptions],
+            cancel_association_membership=False,
+            cancel_solidarity_contribution=True,
+        )
+
+        self.assert_cancellation_confirmed(response_content)
+        self.assert_solidarity_contribution_cancelled(amount=Decimal("-5"))
+
+    def test_post_negativeSolidarityMustBeCancelledButFlagIsFalse_returnsError(self):
+        member = MemberFactory.create()
+        self.client.force_login(member)
+        self._enable_subscription_cancellation_outside_trial()
+        subscriptions = self._create_subscriptions(member=member, size=2)
+        self._create_solidarity_contribution(member=member, amount=Decimal("-5"))
+
+        response_content = self._post_cancellation(
+            member=member,
+            product_ids=[subscription.product_id for subscription in subscriptions],
+            cancel_association_membership=False,
+            cancel_solidarity_contribution=False,
+        )
+
+        self.assert_cancellation_not_confirmed(
+            response_content,
+            "Der negative Solidarbeitrag muss gekündigt werden, wenn alle Verträge gekündigt werden.",
+        )
+        self.assert_solidarity_contribution_not_cancelled(amount=Decimal("-5"))
+
+    def test_post_allSubscriptionsCancelledAndSolidarityIsPositive_keepsSolidarityContribution(
+        self,
+    ):
+        member = MemberFactory.create()
+        self.client.force_login(member)
+        self._enable_subscription_cancellation_outside_trial()
+        subscriptions = self._create_subscriptions(member=member, size=2)
+        self._create_solidarity_contribution(member=member, amount=Decimal("5"))
+
+        response_content = self._post_cancellation(
+            member=member,
+            product_ids=[subscription.product_id for subscription in subscriptions],
+            cancel_association_membership=False,
+            cancel_solidarity_contribution=False,
+        )
+
+        self.assert_cancellation_confirmed(response_content)
+        self.assert_solidarity_contribution_not_cancelled(amount=Decimal("5"))
+
+    def test_post_notAllSubscriptionsCancelledAndSolidarityIsNegative_keepsSolidarityContribution(
+        self,
+    ):
+        member = MemberFactory.create()
+        self.client.force_login(member)
+        self._enable_subscription_cancellation_outside_trial()
+        subscriptions = self._create_subscriptions(member=member, size=2)
+        self._create_solidarity_contribution(member=member, amount=Decimal("-5"))
+
+        response_content = self._post_cancellation(
+            member=member,
+            product_ids=[subscriptions[0].product_id],
+            cancel_association_membership=False,
+            cancel_solidarity_contribution=False,
+        )
+
+        self.assert_cancellation_confirmed(response_content)
+        self.assert_solidarity_contribution_not_cancelled(amount=Decimal("-5"))
+
+    def test_post_allSubscriptionsCancelledButNotAssociationMembership_keepsNegativeSolidarityContribution(
+        self,
+    ):
+        member = MemberFactory.create()
+        self.client.force_login(member)
+        self._enable_subscription_cancellation_outside_trial()
+        self._set_parameter(
+            key=ParameterKeys.ORGANISATION_LEGAL_STATUS,
+            value=LEGAL_STATUS_ASSOCIATION,
+        )
+        subscriptions = self._create_subscriptions(member=member, size=2)
+        AssociationMembershipFactory.create(
+            member=member, start_date=(self.now + datetime.timedelta(days=30)).date()
+        )
+        self._create_solidarity_contribution(member=member, amount=Decimal("-5"))
+
+        response_content = self._post_cancellation(
+            member=member,
+            product_ids=[subscription.product_id for subscription in subscriptions],
+            cancel_association_membership=False,
+            cancel_solidarity_contribution=False,
+        )
+
+        self.assert_cancellation_confirmed(response_content)
+        self.assert_solidarity_contribution_not_cancelled(amount=Decimal("-5"))
+
+    def test_post_allSubscriptionsCancelledAndAssociationMembershipAlreadyStarted_cancelsNegativeSolidarityContribution(
+        self,
+    ):
+        member = MemberFactory.create()
+        self.client.force_login(member)
+        self._enable_subscription_cancellation_outside_trial()
+        self._set_parameter(
+            key=ParameterKeys.ORGANISATION_LEGAL_STATUS,
+            value=LEGAL_STATUS_ASSOCIATION,
+        )
+        subscriptions = self._create_subscriptions(member=member, size=2)
+        AssociationMembershipFactory.create(
+            member=member, start_date=datetime.date(year=2023, month=1, day=1)
+        )
+        self._create_solidarity_contribution(member=member, amount=Decimal("-5"))
+
+        response_content = self._post_cancellation(
+            member=member,
+            product_ids=[subscription.product_id for subscription in subscriptions],
+            cancel_association_membership=False,
+            cancel_solidarity_contribution=True,
+        )
+
+        self.assert_cancellation_confirmed(response_content)
+        self.assert_solidarity_contribution_cancelled(amount=Decimal("-5"))
+
+    def test_post_allSubscriptionsAndAssociationMembershipCancelled_cancelsNegativeSolidarityContribution(
+        self,
+    ):
+        member = MemberFactory.create()
+        self.client.force_login(member)
+        self._enable_subscription_cancellation_outside_trial()
+        self._set_parameter(
+            key=ParameterKeys.ORGANISATION_LEGAL_STATUS,
+            value=LEGAL_STATUS_ASSOCIATION,
+        )
+        subscriptions = self._create_subscriptions(member=member, size=2)
+        AssociationMembershipFactory.create(
+            member=member, start_date=(self.now + datetime.timedelta(days=30)).date()
+        )
+        self._create_solidarity_contribution(member=member, amount=Decimal("-5"))
+
+        response_content = self._post_cancellation(
+            member=member,
+            product_ids=[subscription.product_id for subscription in subscriptions],
+            cancel_association_membership=True,
+            cancel_solidarity_contribution=True,
+        )
+
+        self.assert_cancellation_confirmed(response_content)
+        self.assert_solidarity_contribution_cancelled(amount=Decimal("-5"))
+
+    def test_post_onlyAssociationMembershipCancelled_cancelsNegativeSolidarityContribution(
+        self,
+    ):
+        member = MemberFactory.create()
+        self.client.force_login(member)
+        self._set_parameter(
+            key=ParameterKeys.ORGANISATION_LEGAL_STATUS,
+            value=LEGAL_STATUS_ASSOCIATION,
+        )
+        AssociationMembershipFactory.create(
+            member=member, start_date=(self.now + datetime.timedelta(days=30)).date()
+        )
+        self._create_solidarity_contribution(member=member, amount=Decimal("-5"))
+
+        response_content = self._post_cancellation(
+            member=member,
+            product_ids=[],
+            cancel_association_membership=True,
+            cancel_solidarity_contribution=True,
+        )
+
+        self.assert_cancellation_confirmed(response_content)
+        self.assert_solidarity_contribution_cancelled(amount=Decimal("-5"))
+
+    def test_post_nothingSelectedAndSolidarityIsNegative_keepsSolidarityContribution(
+        self,
+    ):
+        member = MemberFactory.create()
+        self.client.force_login(member)
+        self._create_solidarity_contribution(member=member, amount=Decimal("-5"))
+
+        response_content = self._post_cancellation(
+            member=member,
+            product_ids=[],
+            cancel_association_membership=False,
+            cancel_solidarity_contribution=False,
+        )
+
+        self.assert_cancellation_confirmed(response_content)
+        self.assert_solidarity_contribution_not_cancelled(amount=Decimal("-5"))
+
+    def _enable_subscription_cancellation_outside_trial(self):
+        self._set_parameter(
+            key=ParameterKeys.SUBSCRIPTION_AUTOMATIC_RENEWAL, value=True
+        )
+
+    def _create_subscriptions(self, member, size: int):
+        period = GrowingPeriodFactory.create(
+            start_date=datetime.date(year=2023, month=1, day=1)
+        )
+        return SubscriptionFactory.create_batch(size=size, member=member, period=period)
+
+    def _create_solidarity_contribution(self, member, amount: Decimal):
+        return SolidarityContributionFactory.create(
+            member=member,
+            start_date=datetime.date(year=2023, month=1, day=1),
+            end_date=datetime.date(year=2023, month=12, day=31),
+            amount=amount,
+        )
+
+    def _post_cancellation(
+        self,
+        member,
+        product_ids: list,
+        cancel_association_membership: bool,
+        cancel_solidarity_contribution: bool,
+    ):
+        post_data = {
+            "member_id": member.id,
+            "product_ids": product_ids,
+            "cancel_coop_membership": False,
+            "cancel_association_membership": cancel_association_membership,
+            "cancellation_reasons": [],
+            "custom_cancellation_reason": "Test reason",
+            "cancel_solidarity_contribution": cancel_solidarity_contribution,
+        }
+        url = reverse("subscriptions:cancel_subscriptions")
+        response = self.client.post(url, data=post_data)
+        self.assertStatusCode(response, 200)
+        return response.json()
+
+    def assert_solidarity_contribution_cancelled(self, amount: Decimal):
+        contribution = SolidarityContribution.objects.get()
+        self.assertEqual(amount, contribution.amount)
+        self.assertEqual(
+            datetime.date(year=2023, month=3, day=15), contribution.cancellation_ts
+        )
+        self.assertEqual(
+            datetime.date(year=2023, month=12, day=31), contribution.end_date
+        )
+
+    def assert_solidarity_contribution_not_cancelled(self, amount: Decimal):
+        contribution = SolidarityContribution.objects.get()
+        self.assertEqual(amount, contribution.amount)
+        self.assertIsNone(contribution.cancellation_ts)
+        self.assertEqual(
+            datetime.date(year=2023, month=12, day=31), contribution.end_date
+        )
 
     def assert_cancellation_confirmed(self, response_content: dict):
         self.assertTrue(

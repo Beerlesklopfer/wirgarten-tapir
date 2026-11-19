@@ -8,6 +8,7 @@ import DeliveryListCard from "./deliveries_and_jokers/DeliveryListCard.tsx";
 import FuturePaymentsCard from "./future_payments/FuturePaymentsCard.tsx";
 import MemberMailCategoryCard from "./mail_category/MemberMailCategoryCard.tsx";
 import MemberMailingListsCard from "./mailing_lists/MemberMailingListsCard.tsx";
+import PaymentExportExclusionPeriodBase from "./payment_export_exclusion/PaymentExportExclusionPeriodBase.tsx";
 import MemberProfilePaymentRhythmBase from "./payment_rhythm/MemberProfilePaymentRhythmBase.tsx";
 import PersonalDataDropdown from "./personal_data/PersonalDataDropdown.tsx";
 import MemberProfileSolidarityContributionCard from "./solidarity_contribution/MemberProfileSolidarityContributionCard.tsx";
@@ -35,7 +36,8 @@ if (domNodeDeliveryListCard) {
         domNodeDeliveryListCard.dataset
           .membersCanChangePickupLocationThemselves === "true"
       }
-      adminContactEmail={domNodeDeliveryListCard.dataset.adminContactEmail!}
+      contactEmail={domNodeDeliveryListCard.dataset.contactEmail!}
+      pickupLocationLabel={domNodeDeliveryListCard.dataset.pickupLocationLabel!}
       csrfToken={getCsrfToken()}
     />,
   );
@@ -56,6 +58,8 @@ if (contractTilesElement) {
         showContractEdit={
           contractTilesElement.dataset.showContractEdit === "True"
         }
+        contactEmail={contractTilesElement.dataset.contactEmail!}
+        adminVersion={contractTilesElement.dataset.userIsAdmin === "True"}
       />
       {showCancellationCard && (
         <SubscriptionCancellationCard
@@ -76,7 +80,7 @@ if (domNodeWaitingListCard) {
   root.render(
     <MemberProfileWaitingListCard
       memberId={domNodeWaitingListCard.dataset.memberId!}
-      adminEmail={domNodeWaitingListCard.dataset.adminEmail!}
+      contactEmail={domNodeWaitingListCard.dataset.contactEmail!}
     />,
   );
 } else {
@@ -92,7 +96,7 @@ if (domNodeSolidarityCard) {
   root.render(
     <MemberProfileSolidarityContributionCard
       memberId={domNodeSolidarityCard.dataset.memberId!}
-      adminEmail={domNodeSolidarityCard.dataset.adminEmail!}
+      contactEmail={domNodeSolidarityCard.dataset.contactEmail!}
       adminVersion={domNodeSolidarityCard.dataset.userIsAdmin === "True"}
       membersCanChangeContribution={
         domNodeSolidarityCard.dataset.membersCanChangeContribution === "True"
@@ -134,6 +138,20 @@ if (domNodePaymentRhythmButton) {
   );
 } else {
   console.error("Failed to render payment rhythm button from React");
+}
+
+const domNodePaymentExportExclusionButton = document.getElementById(
+  "payment_export_exclusion_period_button",
+);
+if (domNodePaymentExportExclusionButton) {
+  const root = createRoot(domNodePaymentExportExclusionButton);
+
+  root.render(
+    <PaymentExportExclusionPeriodBase
+      memberId={domNodePaymentExportExclusionButton.dataset.memberId!}
+      csrfToken={getCsrfToken()}
+    />,
+  );
 }
 
 const domNodeCoopSharesCard = document.getElementById("coop_shares_card");
@@ -189,6 +207,9 @@ if (domNodePersonalDataDropdown) {
       csrfToken={getCsrfToken()}
       extraEmailAddressesEnabled={
         domNodePersonalDataDropdown.dataset.extraEmailAddressesEnabled == "True"
+      }
+      hasHomeDelivery={
+        domNodePersonalDataDropdown.dataset.hasHomeDelivery === "True"
       }
     />,
   );

@@ -11,6 +11,16 @@ class BreadInfo:
     max_pieces: int | None  # maximum total pieces to bake (None = no maximum)
     min_remaining_pieces: int  # minimum extra pieces beyond deliveries
     fixed_pieces: int | None = None  # if set, exactly this many must be baked
+    # Breads with the same group_id share stove layers and min/max, see
+    # tapir.bakery.models.BreadGroup. A fixed_pieces bread counts toward its
+    # group, see resolve_groups.
+    group_id: str | None = None
+    group_name: str | None = None
+    # For a grouped bread, min_pieces/max_pieces hold only its settings for
+    # the day and bound the bread alone; these hold its values from the bread
+    # itself, which bound the group's total. See resolve_groups.
+    group_min_pieces: int | None = None
+    group_max_pieces: int | None = None
 
 
 @dataclass
@@ -26,7 +36,9 @@ class PickupLocationInfo:
 class BakingPlanResult:
     bread_quantities: dict[int, int]  # bread_id -> total quantity
     remaining_quantities: dict[int, int]  # bread_id -> remaining quantity
-    stove_sessions: list[list[tuple[int, int] | None]]  # sessions x layers
+    # sessions x layers x (bread_id, pieces); an empty list is an empty layer,
+    # and only breads of one group share a layer.
+    stove_sessions: list[list[list[tuple[int, int]]]]
     distribution: dict[tuple[int, int], int]  # (bread_id, location_id) -> count
     total_deliveries: int
     sessions_used: int

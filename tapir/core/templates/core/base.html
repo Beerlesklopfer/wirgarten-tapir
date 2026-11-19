@@ -1,5 +1,5 @@
 {% load django_bootstrap5 %}
-{% load tapir_static %}
+{% load static %}
 {% load i18n %}
 {% load core %}
 {% load django_vite %}
@@ -20,8 +20,6 @@
         <link rel="stylesheet"
               href="{% static 'core/css/selectize.default.min.css' %}" />
         {% get_parameter_value_tag "organisation.theme" cache as theme %}
-        <link rel="stylesheet"
-              href="{% static 'core/themes/'|add:theme|add:'/css/custom.css' %}" />
         <link rel="stylesheet" href="{% static 'core/css/mobile.css' %}">
         <link rel="shortcut icon"
               type="image/png"
@@ -41,6 +39,8 @@
         {% vite_hmr_client %}
         {% vite_react_refresh %}
         {% block head %}{% endblock %}
+        <link rel="stylesheet"
+              href="{% static 'core/themes/'|add:theme|add:'/css/custom.css' %}" />
     </head>
     <body>
         <div id="page-content">
@@ -55,13 +55,13 @@
                     </button>
                 {% endif %}
                 <span class="navbar-brand">
-                    <img alt="Wirgarten Logo"
+                    <img alt="{% get_parameter_value_tag 'wirgarten.site.name' cache %}"
                          height="30"
                          src="{% static 'core/themes/'|add:theme|add:'/images/Logo_white.webp' %}">
                 </span>
                 {% if request.user.is_authenticated %}
                     <div style="width: 100%; display: flex; justify-content: space-between">
-                        <a class="text-light nav-link" style="white-space:nowrap" href="/">{{ request.user.first_name }} {{ request.user.last_name }}</a>
+                        <a class="text-light nav-link text-truncate" href="/">{{ request.user.first_name }} {{ request.user.last_name }}</a>
                         {% if debug %}
                             {% get_parameter_value_tag "wirgarten.tests.override_date_preset" cache as date_preset %}
                             {% if date_preset != "disabled" %}
@@ -84,6 +84,7 @@
                             {% block sidebar %}
                                 {% sidebar_links %}
                             {% endblock %}
+                            <div class="sidebar-item-details px-3 py-2 text-muted small">Tapir {% tapir_version %}</div>
                         </div>
                     </nav>
                     <div id="sidebar-backdrop"></div>
@@ -119,8 +120,7 @@
             sortField: 'text'
         })
         for (const elem of document.getElementsByClassName('selectize-input')) {
-            elem.classList.add('form-select');
-            elem.classList.add('is-valid');
+            elem.classList.add('form-select', 'is-valid');
         }
     </script>
 </html>

@@ -1,4 +1,4 @@
-{% load tapir_static %}
+{% load static %}
 {% load i18n %}
 {% block head %}
     <link rel="stylesheet" href="{% static 'wirgarten/css/form-modal.css' %}">
@@ -25,7 +25,7 @@
             </div>
             <div id="modal-loading-indicator" class="modal-body">{% include 'wirgarten/generic/loading-spinner.html' %}</div>
             <div class="modal-body">
-                <iframe scrolling="no" id="content-frame" width="100%"></iframe>
+                <iframe scrolling="no" id="content-frame" title="Formular" style="width: 100%"></iframe>
             </div>
         </div>
     </div>

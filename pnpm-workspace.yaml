@@ -3,3 +3,10 @@ allowBuilds:
   '@openapitools/openapi-generator-cli': true
   '@swc/core': true
   esbuild: true
+minimumReleaseAge: 10080
+overrides:
+  # GHSA-c475-qrg2-pj4r, GHSA-5pm8-86m8-9m6r, GHSA-r4jh-29pc-gfqr; only used by
+  # @openapitools/openapi-generator-cli through proxy-agent
+  basic-ftp: 6.2.4
+  # GHSA-g3hv-75wg-m249; only used by @openapitools/openapi-generator-cli through glob 13
+  minimatch: 11.0.5

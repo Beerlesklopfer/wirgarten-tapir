@@ -1,8 +1,9 @@
 import dayjs from "dayjs";
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Accordion, AccordionBody } from "react-bootstrap";
 import {
   AssociationMembershipType,
+  DeliveryAddressRequest,
   PublicGrowingPeriod,
   PublicPickupLocation,
   PublicProductType,
@@ -16,16 +17,20 @@ import { doesProductBelongsToProductType } from "../../bestell_wizard/utils/does
 import { isAtLeastOneProductOrdered } from "../../bestell_wizard/utils/isAtLeastOneProductOrdered.ts";
 import { isProductTypeOrdered } from "../../bestell_wizard/utils/isProductTypeOrdered.ts";
 import TapirButton from "../../components/TapirButton.tsx";
+import { toApiDate } from "../../utils/apiDate.ts";
 import formatAddress from "../../utils/formatAddress.ts";
+import { formatCoopShareLabel } from "../../utils/formatCoopShareLabel.ts";
 import { formatCurrency } from "../../utils/formatCurrency.ts";
 import { formatDateNumeric } from "../../utils/formatDateNumeric.ts";
 import NextStepButton from "../components/NextStepButton.tsx";
 import { Step } from "../types/Step.ts";
 import { atLeastOneMonthlyPayment } from "../utils/atLeastOneMonthlyPayment.ts";
+import { buildDeliveryChargeBadge } from "../utils/buildDeliveryChargeBadge.tsx";
 import { BUTTON_VARIANT } from "../utils/BUTTON_VARIANT.ts";
 import { doesWaitingListHaveProductType } from "../utils/doesWaitingListHaveProductType.ts";
 import { getAssociationMembershipTypeMonthlyPriceFormatted } from "../utils/getAssociationMembershipTypeMonthlyPriceFormatted.ts";
 import { getFirstPickupLocationWithCapacity } from "../utils/getFirstPickupLocationWithCapacity.ts";
+import { getNumberOfCoopShareInstalments } from "../utils/getNumberOfCoopShareInstalments.ts";
 import {
   getProductById,
   getProductByIdGlobal,
@@ -34,16 +39,18 @@ import { getProductTypeByProductId } from "../utils/getProductTypeByProductId.ts
 import { getTotalPriceForProductType } from "../utils/getTotalPriceForProductType.ts";
 import { getVisibleAssociationMembershipTypes } from "../utils/getVisibleAssociationMembershipTypes.ts";
 import { scrollIntoView } from "../utils/scrollIntoView.ts";
+import { willBecomeMemberNow } from "../utils/willBecomeMemberNow.ts";
 
 interface Step10OrderSummaryProps {
   settings: BestellWizardSettings;
   shoppingCart: ShoppingCart;
   numberOfCoopShares: number;
+  payCoopSharesInInstalments?: boolean;
   studentStatusEnabled: boolean;
   goToNextStep: () => void;
-  contractStartDate: Date;
+  contractStartDate: Date | undefined;
   firstDeliveryDatesByPickupLocationAndProductType: {
-    [key: string]: { [key: string]: Date };
+    [key: string]: { [key: string]: string };
   };
   goToProductTypeStep: (pt: PublicProductType) => void;
   selectedPickupLocations: PublicPickupLocation[];
@@ -62,6 +69,7 @@ interface Step10OrderSummaryProps {
   hideTrialPeriod: boolean;
   stepActive: boolean;
   setCurrentStep: (step: Step) => void;
+  deliveryAddress?: DeliveryAddressRequest;
 }
 
 const PaymentRow: React.FC<{
@@ -82,6 +90,7 @@ const Step10OrderSummary: React.FC<Step10OrderSummaryProps> = ({
   settings,
   shoppingCart,
   numberOfCoopShares,
+  payCoopSharesInInstalments,
   studentStatusEnabled,
   goToNextStep,
   contractStartDate,
@@ -103,14 +112,8 @@ const Step10OrderSummary: React.FC<Step10OrderSummaryProps> = ({
   hideTrialPeriod,
   stepActive,
   setCurrentStep,
+  deliveryAddress,
 }) => {
-  const [activePickupLocation, setActivePickupLocation] =
-    useState<PublicPickupLocation>();
-
-  useEffect(() => {
-    setActivePickupLocation(getRelevantPickupLocation());
-  }, [selectedPickupLocations]);
-
   function getRelevantPickupLocation(): PublicPickupLocation | undefined {
     if (waitingListEntryDetails === undefined) {
       return getFirstPickupLocationWithCapacity(
@@ -125,6 +128,8 @@ const Step10OrderSummary: React.FC<Step10OrderSummaryProps> = ({
 
     return waitingListEntryDetails.currentPickupLocation;
   }
+
+  const activePickupLocation = getRelevantPickupLocation();
 
   function getProductTypeTitle(productType: PublicProductType) {
     if (isProductTypeOrdered(productType, shoppingCart)) {
@@ -190,7 +195,7 @@ const Step10OrderSummary: React.FC<Step10OrderSummaryProps> = ({
     if (!pickupLocation) {
       return undefined;
     }
-    const pickupLocationId = pickupLocation.id!;
+    const pickupLocationId = pickupLocation.id;
 
     if (
       !(pickupLocationId in firstDeliveryDatesByPickupLocationAndProductType)
@@ -224,19 +229,88 @@ const Step10OrderSummary: React.FC<Step10OrderSummaryProps> = ({
     return "Unbekannt";
   }
 
+  function formatDeliveryAddress() {
+    if (deliveryAddress === undefined || waitingListEntryDetails) {
+      return undefined;
+    }
+
+    if (deliveryAddress.sameAsBillingAddress) {
+      return formatAddress(
+        personalData.street,
+        personalData.street2,
+        personalData.postcode,
+        personalData.city,
+      );
+    }
+
+    return formatAddress(
+      deliveryAddress.street ?? "",
+      deliveryAddress.street2 ?? "",
+      deliveryAddress.postcode ?? "",
+      deliveryAddress.city ?? "",
+    );
+  }
+
+  function buildActivePickupLocationItems(
+    pickupLocation: PublicPickupLocation,
+  ) {
+    if (!pickupLocation.isHomeDelivery) {
+      return (
+        <li>
+          Aktive Verteilstation:{" "}
+          {pickupLocation.name +
+            " (" +
+            formatAddress(
+              pickupLocation.street,
+              pickupLocation.street2,
+              pickupLocation.postcode,
+              pickupLocation.city,
+            ) +
+            ")"}
+        </li>
+      );
+    }
+
+    const address = formatDeliveryAddress();
+    const deliveryChargeBadge = buildDeliveryChargeBadge(pickupLocation);
+    return (
+      <>
+        <li>Hauslieferung: {pickupLocation.name}</li>
+        {address && <li>Lieferadresse: {address}</li>}
+        {deliveryChargeBadge && <li>Liefergebühr: {deliveryChargeBadge}</li>}
+      </>
+    );
+  }
+
   function getLocationsNotActive() {
     return selectedPickupLocations.filter(
       (pickupLocation) => pickupLocation !== activePickupLocation,
     );
   }
 
+  function getPickupLocationWishHeading() {
+    if (activePickupLocation) {
+      return "Weitere Verteilstation-Wünsche auf Warteliste:";
+    }
+
+    if (getLocationsNotActive().length === 1) {
+      return "Verteilstation auf der Warteliste:";
+    }
+
+    return "Verteilstationen auf der Warteliste:";
+  }
+
   function getEndOfTrialPeriod(productTypeId: string) {
-    const firstDelivery = dayjs(getDateOfFirstDelivery(productTypeId));
+    const dateOfFirstDelivery = getDateOfFirstDelivery(productTypeId);
+    if (!dateOfFirstDelivery) {
+      return undefined;
+    }
+    const firstDelivery = dayjs(dateOfFirstDelivery);
     return firstDelivery
       .subtract(firstDelivery.get("day") - 1, "days")
       .add(settings.trialPeriodLengthInWeeks, "week")
       .subtract(1, "day")
-      .toDate();
+      .format("YYYY-MM-DD");
   }
 
   function getProductTypeList() {
@@ -312,14 +386,35 @@ const Step10OrderSummary: React.FC<Step10OrderSummaryProps> = ({
   function getPaymentSegments() {
     const segments: React.ReactNode[] = [];
 
-    if (isOneTimePaymentShown()) {
+    if (isOneTimePaymentShown() && payCoopSharesInInstalments) {
+      segments.push(
+        <>
+          <strong>
+            {getNumberOfCoopShareInstalments(numberOfCoopShares, settings)}{" "}
+            monatliche Raten:
+          </strong>
+          <PaymentRow
+            label={
+              "Genossenschaftsanteile" +
+              (willBecomeMemberNow(settings, becomeMemberNow)
+                ? ""
+                : " (Start wenn Platz frei)")
+            }
+            amount={settings.coopShareInstalmentAmount}
+            perMonth={true}
+          />
+        </>,
+      );
+    } else if (isOneTimePaymentShown()) {
       segments.push(
         <>
           <strong>Einmalig:</strong>
           <PaymentRow
             label={
               "Genossenschaftsanteile" +
-              (becomeMemberNow === false ? " (Start wenn Platz frei)" : "")
+              (willBecomeMemberNow(settings, becomeMemberNow)
+                ? ""
+                : " (Start wenn Platz frei)")
             }
             amount={numberOfCoopShares * settings.priceOfAShare}
           />
@@ -406,31 +501,29 @@ const Step10OrderSummary: React.FC<Step10OrderSummaryProps> = ({
                         <>
                           <li>
                             Vertragsstart:{" "}
-                            {formatDateNumeric(contractStartDate)}
+                            {contractStartDate &&
+                              formatDateNumeric(toApiDate(contractStartDate))}
                           </li>
                           {!productType.noDelivery && (
                             <>
                               <li>
-                                Erste Abholung:{" "}
+                                {activePickupLocation?.isHomeDelivery
+                                  ? "Erste Lieferung"
+                                  : "Erste Abholung"}
+                                :{" "}
                                 {(selectedPickupLocations.length > 0 ||
                                   waitingListEntryDetails?.currentPickupLocation) &&
                                   formatDateNumeric(
                                     getDateOfFirstDelivery(productType.id!),
                                   )}
                               </li>
-                              <li>
-                                Aktive Verteilstation:{" "}
-                                {activePickupLocation &&
-                                  activePickupLocation.name +
-                                    " (" +
-                                    formatAddress(
-                                      activePickupLocation.street,
-                                      activePickupLocation.street2,
-                                      activePickupLocation.postcode,
-                                      activePickupLocation.city,
-                                    ) +
-                                    ")"}
-                              </li>
+                              {activePickupLocation ? (
+                                buildActivePickupLocationItems(
+                                  activePickupLocation,
+                                )
+                              ) : (
+                                <li>Aktive Verteilstation:</li>
+                              )}
                               {!hideTrialPeriod &&
                                 settings.trialPeriodLengthInWeeks > 0 && (
                                   <li>
@@ -448,9 +541,7 @@ const Step10OrderSummary: React.FC<Step10OrderSummaryProps> = ({
                       {!productType.noDelivery &&
                         getLocationsNotActive().length > 0 && (
                           <li>
-                            <div>
-                              Weitere Verteilstation-Wünsche auf Warteliste:
-                            </div>
+                            <div>{getPickupLocationWishHeading()}</div>
                             <ul>
                               {getLocationsNotActive().map((pickupLocation) => (
                                 <li key={pickupLocation.id}>
@@ -475,7 +566,7 @@ const Step10OrderSummary: React.FC<Step10OrderSummaryProps> = ({
           ))}
           {!singleProductType &&
             settings.showCoopContent &&
-            becomeMemberNow !== false &&
+            willBecomeMemberNow(settings, becomeMemberNow) &&
             !waitingListEntryDetails?.memberAlreadyExists && (
               <Accordion>
                 <Accordion.Item
@@ -484,15 +575,35 @@ const Step10OrderSummary: React.FC<Step10OrderSummaryProps> = ({
                 >
                   <Accordion.Header>{getCoopSharesTitle()}</Accordion.Header>
                   <AccordionBody>
-                    {studentStatusEnabled
-                      ? settings.strings.step10TextStudent
-                      : numberOfCoopShares +
-                        " Genossenschaftsanteile à " +
-                        formatCurrency(settings.priceOfAShare) +
-                        " = " +
-                        formatCurrency(
-                          numberOfCoopShares * settings.priceOfAShare,
+                    {studentStatusEnabled ? (
+                      settings.strings.step10TextStudent
+                    ) : (
+                      <>
+                        {numberOfCoopShares +
+                          " " +
+                          formatCoopShareLabel(numberOfCoopShares) +
+                          " à " +
+                          formatCurrency(settings.priceOfAShare) +
+                          " = " +
+                          formatCurrency(
+                            numberOfCoopShares * settings.priceOfAShare,
+                          )}
+                        {payCoopSharesInInstalments && (
+                          <>
+                            <br />
+                            {"in " +
+                              getNumberOfCoopShareInstalments(
+                                numberOfCoopShares,
+                                settings,
+                              ) +
+                              " monatlichen Raten à " +
+                              formatCurrency(
+                                settings.coopShareInstalmentAmount,
+                              )}
+                          </>
                         )}
+                      </>
+                    )}
                     <TapirButton
                       variant={BUTTON_VARIANT}
                       size={"sm"}
@@ -562,7 +673,11 @@ const Step10OrderSummary: React.FC<Step10OrderSummaryProps> = ({
                     <li>
                       Betrag: {formatCurrency(solidarityContribution)} / Monat
                     </li>
-                    <li>Gültig ab: {formatDateNumeric(contractStartDate)}</li>
+                    <li>
+                      Gültig ab:{" "}
+                      {contractStartDate &&
+                        formatDateNumeric(toApiDate(contractStartDate))}
+                    </li>
                   </ul>
                   {(waitingListEntryDetails === undefined ||
                     waitingListEntryDetails.shouldShowSolidarityStep) && (

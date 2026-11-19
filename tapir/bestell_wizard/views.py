@@ -42,6 +42,9 @@ from tapir.deliveries.services.delivery_date_calculator import DeliveryDateCalcu
 from tapir.payments.services.member_payment_rhythm_service import (
     MemberPaymentRhythmService,
 )
+from tapir.pickup_locations.services.member_delivery_address_getter import (
+    DeliveryAddressInput,
+)
 from tapir.pickup_locations.services.pickup_location_active_filter import (
     PickupLocationActiveFilter,
 )
@@ -173,20 +176,23 @@ class BestellWizardAssociationMembershipView(TemplateView):
 class BestellWizardProductTypeView(TemplateView):
     template_name = "bestell_wizard/bestell_wizard_product_type.html"
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cache = {}
+
     def get(self, request, *args, **kwargs):
         check_permission_or_self(pk=kwargs["member_id"], request=request)
         if not request.user.has_perm(
             Permission.Coop.MANAGE
         ) and not get_parameter_value(
-            ParameterKeys.MEMBERS_CAN_UPDATE_THEIR_CONTRACTS, cache={}
+            ParameterKeys.MEMBERS_CAN_UPDATE_THEIR_CONTRACTS, cache=self.cache
         ):
             raise PermissionDenied()
         return super().get(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context_data = super().get_context_data(**kwargs)
-        cache = {}
-        BestellWizardMobileView.add_body_style_context(context_data, cache)
+        BestellWizardMobileView.add_body_style_context(context_data, self.cache)
         context_data["member_id"] = kwargs["member_id"]
         context_data["product_type_id"] = kwargs["product_type_id"]
 
@@ -253,13 +259,20 @@ class BestellWizardConfirmOrderApiView(APIView):
         order = TapirOrderBuilder.build_tapir_order_from_shopping_cart_serializer(
             validated_serializer_data["shopping_cart_order"], cache=cache
         )
+        force_waiting_list = get_parameter_value(
+            ParameterKeys.BESTELLWIZARD_FORCE_WAITING_LIST, cache=cache
+        )
+        if len(order) > 0 and force_waiting_list:
+            raise ValidationError("Nur Warteliste-Einträge sind erlaubt.")
+
         member = None
         waiting_list_entry = None
 
         become_member_now = validated_serializer_data["become_member_now"]
-        if not legal_status_is_cooperative(
-            cache=cache
-        ) and not legal_status_is_association(cache=cache):
+        if force_waiting_list or (
+            not legal_status_is_cooperative(cache=cache)
+            and not legal_status_is_association(cache=cache)
+        ):
             become_member_now = False
 
         if len(order) > 0 or become_member_now:
@@ -277,7 +290,8 @@ class BestellWizardConfirmOrderApiView(APIView):
         )
 
         if (
-            len(order_waiting_list) > 0
+            force_waiting_list
+            or len(order_waiting_list) > 0
             or len(validated_serializer_data["pickup_location_ids"]) > 1
         ):
             if member is None:
@@ -311,9 +325,19 @@ class BestellWizardConfirmOrderApiView(APIView):
             contract_start_date=contract_start_date,
             cache=cache,
         )
+        delivery_address_input = cls.build_delivery_address_input(
+            validated_serializer_data=validated_serializer_data
+        )
+        BestellWizardOrderValidator.validate_home_delivery_address(
+            pickup_location_ids=validated_serializer_data["pickup_location_ids"],
+            delivery_address_input=delivery_address_input,
+            personal_data=validated_serializer_data["personal_data"],
+            cache=cache,
+        )
 
         return BestellWizardOrderFulfiller.create_member_and_fulfill_order(
             validated_serializer_data=validated_serializer_data,
+            delivery_address_input=delivery_address_input,
             contract_start_date=contract_start_date,
             request=request,
             cache=cache,
@@ -342,6 +366,15 @@ class BestellWizardConfirmOrderApiView(APIView):
             phone_number=validated_serializer_data["personal_data"]["phone_number"],
             cache=cache,
         )
+        delivery_address_input = cls.build_delivery_address_input(
+            validated_serializer_data=validated_serializer_data
+        )
+        BestellWizardOrderValidator.validate_home_delivery_address(
+            pickup_location_ids=validated_serializer_data["pickup_location_ids"],
+            delivery_address_input=delivery_address_input,
+            personal_data=validated_serializer_data["personal_data"],
+            cache=cache,
+        )
         entry = WaitingListEntryCreator.create_entry_potential_member(
             order=waiting_list_order,
             pickup_location_ids_in_priority_order=validated_serializer_data[
@@ -349,6 +382,7 @@ class BestellWizardConfirmOrderApiView(APIView):
             ],
             number_of_coop_shares=validated_serializer_data["number_of_coop_shares"],
             personal_data=validated_serializer_data["personal_data"],
+            delivery_address_input=delivery_address_input,
             cache=cache,
         )
         WaitingListEntryConfirmationEmailSender.send_confirmation_mail(
@@ -390,6 +424,30 @@ class BestellWizardConfirmOrderApiView(APIView):
         WaitingListEntryConfirmationEmailSender.send_confirmation_mail(
             entry=entry,
             existing_member_id=member.id,
+        )
+
+    @staticmethod
+    def build_delivery_address_input(
+        validated_serializer_data: dict,
+    ) -> DeliveryAddressInput:
+        delivery_address = validated_serializer_data.get("delivery_address")
+        if delivery_address is None or delivery_address["same_as_billing_address"]:
+            return DeliveryAddressInput(
+                same_as_billing_address=True,
+                street="",
+                street_2="",
+                postcode="",
+                city="",
+                country="",
+            )
+
+        return DeliveryAddressInput(
+            same_as_billing_address=False,
+            street=delivery_address["street"],
+            street_2=delivery_address["street_2"],
+            postcode=delivery_address["postcode"],
+            city=delivery_address["city"],
+            country=delivery_address["country"],
         )
 
 
@@ -459,7 +517,7 @@ class BestellWizardBaseDataApiView(APIView):
 
     @staticmethod
     def build_logo_url(cache: dict):
-        # The wizard has a light background: themes can ship a dark logo for it
+        # The wizard may have a light background: themes can ship a dark logo for it
         theme = get_parameter_value(key=ParameterKeys.ORGANISATION_THEME, cache=cache)
         dark_logo = f"core/themes/{theme}/images/Logo_dark.webp"
         if staticfiles_storage.exists(dark_logo):
@@ -562,28 +620,33 @@ class BestellWizardBaseDataApiView(APIView):
     def build_simple_response_fields(cls, cache: dict):
         serializer_key_to_parameter_key_map = {
             "price_of_a_share": ParameterKeys.COOP_SHARE_PRICE,
+            "coop_share_instalments_enabled": ParameterKeys.COOP_SHARES_INSTALMENTS_ENABLED,
+            "coop_share_instalment_amount": ParameterKeys.COOP_SHARES_INSTALMENT_AMOUNT,
             "theme": ParameterKeys.ORGANISATION_THEME,
             "allow_investing_membership": ParameterKeys.COOP_SHARES_INDEPENDENT_FROM_HARVEST_SHARES,
             "force_waiting_list": ParameterKeys.BESTELLWIZARD_FORCE_WAITING_LIST,
             "intro_enabled": ParameterKeys.BESTELLWIZARD_SHOW_INTRO,
             "student_status_allowed": ParameterKeys.ALLOW_STUDENT_TO_ORDER_WITHOUT_COOP_SHARES,
             "phone_number_required": ParameterKeys.MEMBER_PHONE_NUMBER_REQUIRED,
-            "intro_step_text": ParameterKeys.BESTELLWIZARD_INTRO_TEXT,
             "label_checkbox_sepa_mandat": ParameterKeys.BESTELLWIZARD_SEPA_MANDAT_CHECKBOX_TEXT,
             "label_checkbox_contract_policy": ParameterKeys.BESTELLWIZARD_CONTRACT_POLICY_CHECKBOX_TEXT,
             "default_payment_rhythm": ParameterKeys.PAYMENT_DEFAULT_RHYTHM,
             "coop_statute_link": ParameterKeys.COOP_STATUTE_LINK,
             "organization_name": ParameterKeys.SITE_NAME,
             "contact_mail_address": ParameterKeys.SITE_EMAIL,
+            "website_url": ParameterKeys.SITE_WEBSITE_LINK,
             "solidarity_contribution_default": ParameterKeys.SOLIDARITY_DEFAULT,
             "feedback_step_enabled": ParameterKeys.BESTELLWIZARD_STEP13_ENABLED,
             "solidarity_step_position": ParameterKeys.BESTELL_WIZARD_SOLIDARITY_STEP_POSITION,
             "legal_status": ParameterKeys.ORGANISATION_LEGAL_STATUS,
             "associations_allow_investing_membership": ParameterKeys.ASSOCIATIONS_ALLOW_SUPPORTING_MEMBERSHIP,
         }
-        return cls.build_dictionary_from_config_parameters(
-            serializer_key_to_parameter_key_map, cache
-        )
+        return {
+            **cls.build_dictionary_from_config_parameters(
+                serializer_key_to_parameter_key_map, cache
+            ),
+            "pseudonym_enabled": settings.BAKERY_ENABLED,
+        }
 
     @classmethod
     def build_strings_object(cls, cache: dict):
@@ -601,14 +664,17 @@ class BestellWizardBaseDataApiView(APIView):
             "step3b_text": ParameterKeys.BESTELLWIZARD_STEP3B_TEXT,
             "step4b_waiting_list_modal_title": ParameterKeys.BESTELL_WIZARD_STEP4B_WAITING_LIST_MODAL_HEADER,
             "step4b_waiting_list_modal_text": ParameterKeys.BESTELL_WIZARD_STEP4B_WAITING_LIST_MODAL_TEXT,
+            "step4b_base_price_label": ParameterKeys.BESTELLWIZARD_STEP4B_BASE_PRICE_LABEL,
             "step4d_title": ParameterKeys.BESTELLWIZARD_STEP4D_TITLE,
             "step4d_text": ParameterKeys.BESTELLWIZARD_STEP4D_TEXT,
             "step4d_text_supporting_member": ParameterKeys.BESTELLWIZARD_STEP4D_TEXT_SUPPORTING_MEMBER,
             "step5a_title": ParameterKeys.BESTELLWIZARD_STEP5A_TITLE,
             "step5a_text": ParameterKeys.BESTELLWIZARD_STEP5A_TEXT,
             "step5b_title": ParameterKeys.BESTELLWIZARD_STEP5B_TITLE,
+            "step5b_home_delivery_title": ParameterKeys.BESTELLWIZARD_STEP5B_HOME_DELIVERY_TITLE,
             "step5c_title": ParameterKeys.BESTELLWIZARD_STEP5C_TITLE,
             "step5c_text": ParameterKeys.BESTELLWIZARD_STEP5C_TEXT,
+            "home_delivery_choice_text": ParameterKeys.BESTELLWIZARD_HOME_DELIVERY_CHOICE_TEXT,
             "step6a_title": ParameterKeys.BESTELLWIZARD_STEP6A_TITLE,
             "step6a_text": ParameterKeys.BESTELLWIZARD_STEP6A_TEXT,
             "step6b_title": ParameterKeys.BESTELLWIZARD_STEP6B_TITLE,
@@ -617,7 +683,6 @@ class BestellWizardBaseDataApiView(APIView):
             "step6c_title": ParameterKeys.BESTELLWIZARD_STEP6C_TITLE,
             "step6c_text": ParameterKeys.BESTELLWIZARD_STEP6C_TEXT,
             "step6c_checkbox_statute": ParameterKeys.BESTELLWIZARD_STEP6C_CHECKBOX_STATUTE,
-            "step6c_text_statute": ParameterKeys.BESTELLWIZARD_STEP6C_TEXT_STATUTE,
             "step6c_checkbox_commitment": ParameterKeys.BESTELLWIZARD_STEP6C_CHECKBOX_COMMITMENT,
             "step8_title": ParameterKeys.BESTELLWIZARD_STEP8_TITLE,
             "step8_text": ParameterKeys.BESTELLWIZARD_STEP8_TEXT,
@@ -637,6 +702,7 @@ class BestellWizardBaseDataApiView(APIView):
             "step14_text": ParameterKeys.BESTELLWIZARD_STEP14_TEXT,
             "step14b_title": ParameterKeys.BESTELLWIZARD_STEP14B_TITLE,
             "step14b_text": ParameterKeys.BESTELLWIZARD_STEP14B_TEXT,
+            "step14_back_to_website_button_text": ParameterKeys.BESTELLWIZARD_STEP14_BACK_TO_WEBSITE_BUTTON_TEXT,
             "privacy_policy_url": ParameterKeys.SITE_PRIVACY_LINK,
             "label_student_checkbox": ParameterKeys.LABEL_STUDENT_CHECKBOX,
             "student_checkbox_explanation_text": ParameterKeys.STUDENT_CHECKBOX_EXPLANATION_TEXT,
@@ -928,7 +994,7 @@ class PublicBestellWizardIsEmailAddressValidApiView(APIView):
 
         try:
             PersonalDataValidator.validate_email_address_not_in_use(
-                email=email, cache={}, check_waiting_list=True
+                email=email, check_waiting_list=True
             )
         except ValidationError:
             return Response(False)

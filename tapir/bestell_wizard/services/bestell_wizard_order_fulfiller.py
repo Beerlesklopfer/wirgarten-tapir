@@ -23,6 +23,12 @@ from tapir.coop.services.member_number_service import MemberNumberService
 from tapir.payments.services.member_payment_rhythm_service import (
     MemberPaymentRhythmService,
 )
+from tapir.pickup_locations.services.member_delivery_address_getter import (
+    DeliveryAddressInput,
+)
+from tapir.pickup_locations.services.member_delivery_address_setter import (
+    MemberDeliveryAddressSetter,
+)
 from tapir.pickup_locations.services.member_pickup_location_setter import (
     MemberPickupLocationSetter,
 )
@@ -62,6 +68,7 @@ class BestellWizardOrderFulfiller:
     def create_member_and_fulfill_order(
         cls,
         validated_serializer_data: dict,
+        delivery_address_input: DeliveryAddressInput,
         contract_start_date: datetime.date,
         request,
         cache: dict,
@@ -82,6 +89,7 @@ class BestellWizardOrderFulfiller:
         is_student = validated_serializer_data["student_status_enabled"]
         member = cls.create_member(
             personal_data=validated_serializer_data["personal_data"],
+            delivery_address_input=delivery_address_input,
             is_student=is_student,
             cache=cache,
             request=request,
@@ -121,6 +129,9 @@ class BestellWizardOrderFulfiller:
                 subscriptions=subscriptions,
                 cache=cache,
                 actor=actor,
+                pay_in_instalments=validated_serializer_data[
+                    "pay_coop_shares_in_instalments"
+                ],
             )
         if legal_status_is_association(cache=cache):
             association_membership = cls.create_association_membership(
@@ -167,6 +178,8 @@ class BestellWizardOrderFulfiller:
                 coop_share_transaction=coop_share_transaction,
                 association_membership=association_membership,
                 solidarity_contribution=solidarity_contribution,
+                without_coop_shares=legal_status_is_cooperative(cache=cache)
+                and is_student,
             )
 
         return member
@@ -182,7 +195,14 @@ class BestellWizardOrderFulfiller:
         response.sources.set(sources)
 
     @classmethod
-    def create_member(cls, personal_data, is_student: bool, cache: dict, request):
+    def create_member(
+        cls,
+        personal_data,
+        delivery_address_input: DeliveryAddressInput,
+        is_student: bool,
+        cache: dict,
+        request,
+    ):
         now = get_now(cache=cache)
         contracts_signed = dict.fromkeys(
             ["sepa_consent", "withdrawal_consent", "privacy_consent"], now
@@ -197,12 +217,16 @@ class BestellWizardOrderFulfiller:
                 first_name=personal_data["first_name"],
             )
 
-        member = Member.objects.create(
+        member = Member(
             **personal_data,
             **contracts_signed,
             is_student=is_student,
             username=personal_data["email"]
         )
+        MemberDeliveryAddressSetter.apply_delivery_address_input(
+            target=member, delivery_address_input=delivery_address_input
+        )
+        member.save()
         MemberNumberService.assign_member_number_if_eligible(
             member,
             cache=cache,
@@ -210,15 +234,13 @@ class BestellWizardOrderFulfiller:
         )
 
         KeycloakUserManager.create_keycloak_user_if_necessary(
-            user=member, initial_password=None, cache=cache
+            user=member, initial_password=None
         )
 
         try:
-            EmailVerificationService.send_verification_email(
-                user=member, actor=member, cache=cache
-            )
+            EmailVerificationService.send_verification_email(user=member, actor=member)
         except KeycloakPutError:
-            KeycloakUserDeleteService.delete_user_if_exists(user=member, cache=cache)
+            KeycloakUserDeleteService.delete_user_if_exists(user=member)
             raise
 
         return member
@@ -231,6 +253,7 @@ class BestellWizardOrderFulfiller:
         subscriptions: list[Subscription],
         cache: dict,
         actor: TapirUser,
+        pay_in_instalments: bool,
     ):
         earliest_trial_period_end = cls.get_earliest_trial_period_end(
             subscriptions=subscriptions, cache=cache
@@ -249,6 +272,7 @@ class BestellWizardOrderFulfiller:
             shares_valid_at=shares_valid_at,
             cache=cache,
             actor=actor,
+            pay_in_instalments=pay_in_instalments,
         )
 
     @classmethod

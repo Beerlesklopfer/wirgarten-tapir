@@ -1,13 +1,16 @@
 import datetime
 from decimal import Decimal
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, patch, ANY, MagicMock
 
 from tapir.deliveries.models import Joker
+from tapir.deliveries.services.joker_value_service import JokerValueService
+from tapir.utils.dataclasses import CalculationPart
+from tapir.deliveries.services.member_specific_delivery_day_calculator import (
+    MemberSpecificDeliveryDayCalculator,
+)
 from tapir.generic_exports.services.member_column_provider import MemberColumnProvider
 from tapir.pickup_locations.tests.factories import PickupLocationDeliveryChargeFactory
-from tapir.subscriptions.services.delivery_price_calculator import (
-    DeliveryPriceCalculator,
-)
+from tapir.wirgarten.constants import WEEKLY
 from tapir.wirgarten.models import Member, CoopShareTransaction
 from tapir.wirgarten.parameter_keys import ParameterKeys
 from tapir.wirgarten.parameters import ParameterDefinitions
@@ -175,8 +178,12 @@ class TestMemberColumnProvider(TapirIntegrationTest):
             start_date=datetime.date(year=2025, month=1, day=1),
             end_date=datetime.date(year=2025, month=12, day=31),
         )
-        SubscriptionFactory.create(member=member, period=growing_period)
-        SubscriptionFactory.create(member=member, period=growing_period)
+        SubscriptionFactory.create_batch(
+            2,
+            member=member,
+            period=growing_period,
+            product__type__delivery_cycle=WEEKLY[0],
+        )
 
         joker_1 = Joker.objects.create(
             member=member, date=datetime.date(year=2025, month=1, day=2)
@@ -190,15 +197,19 @@ class TestMemberColumnProvider(TapirIntegrationTest):
         return [joker_1, joker_2]
 
     @patch.object(
-        DeliveryPriceCalculator,
-        "get_price_of_subscriptions_delivered_in_week",
+        JokerValueService,
+        "get_actual_delivery_date",
         autospec=True,
+        side_effect=lambda joker_date, **_: joker_date,
     )
+    @patch.object(JokerValueService, "_get_subscription_part", autospec=True)
     def test_getValueMemberJokerCreditValue_default_returnsSummedPriceOfAllJokersThatAreBeforeDate(
-        self, mock_get_price_of_subscriptions_delivered_in_week: Mock
+        self, mock_get_subscription_part: Mock, _: Mock
     ):
         member = MemberFactory.create()
-        mock_get_price_of_subscriptions_delivered_in_week.side_effect = [12, 27]
+        mock_get_subscription_part.return_value = CalculationPart(
+            explanation="", value=Decimal(6)
+        )
         jokers_before_date = self.setupJokerData(member)
         cache = {}
 
@@ -206,34 +217,26 @@ class TestMemberColumnProvider(TapirIntegrationTest):
             member, datetime.datetime(year=2025, month=1, day=3), cache
         )
 
-        self.assertEqual("39.00", result)
+        # 2 subscriptions * 6 * 2 jokers
+        self.assertEqual("24.00", result)
 
+        self.assertEqual(4, mock_get_subscription_part.call_count)
         self.assertEqual(
-            2, mock_get_price_of_subscriptions_delivered_in_week.call_count
-        )
-        mock_get_price_of_subscriptions_delivered_in_week.assert_has_calls(
-            [
-                call(
-                    member=member,
-                    reference_date=joker.date,
-                    only_subscriptions_affected_by_jokers=True,
-                    cache=cache,
-                )
-                for joker in jokers_before_date
-            ],
-            any_order=True,
+            {joker.date for joker in jokers_before_date},
+            {
+                call_args.kwargs["delivery_date"]
+                for call_args in mock_get_subscription_part.call_args_list
+            },
         )
 
-    @patch.object(
-        DeliveryPriceCalculator,
-        "get_price_of_subscriptions_delivered_in_week",
-        autospec=True,
-    )
+    @patch.object(JokerValueService, "_get_subscription_part", autospec=True)
     def test_getValueMemberJokerCreditValue_pickupLocationHasDeliveryCharge_addsChargePerJoker(
-        self, mock_get_price_of_subscriptions_delivered_in_week: Mock
+        self, mock_get_subscription_part: Mock
     ):
         member = MemberFactory.create()
-        mock_get_price_of_subscriptions_delivered_in_week.side_effect = [12, 27]
+        mock_get_subscription_part.return_value = CalculationPart(
+            explanation="", value=Decimal(6)
+        )
         self.setupJokerData(member)
 
         pickup_location = PickupLocationFactory.create()
@@ -252,8 +255,8 @@ class TestMemberColumnProvider(TapirIntegrationTest):
             member, datetime.datetime(year=2025, month=1, day=3), {}
         )
 
-        # 12 + 27 subscription value + 2.00 delivery charge per joker week
-        self.assertEqual("43.00", result)
+        # 24 subscription value + 2.00 delivery charge per joker week
+        self.assertEqual("28.00", result)
 
     def test_getValueMemberJokerCreditDetails_default_returnsCorrectDetails(self):
         member = MemberFactory.create()
@@ -286,3 +289,84 @@ class TestMemberColumnProvider(TapirIntegrationTest):
             member, datetime.datetime(2025, 1, 1), {}
         )
         self.assertEqual(42, result)
+
+    @patch.object(
+        MemberSpecificDeliveryDayCalculator,
+        "get_specific_delivery_date",
+        autospec=True,
+        return_value=datetime.date(year=2031, month=4, day=17),
+    )
+    def test_getValueMemberDeliveryDate_default_returnsMemberSpecificDeliveryDateInWeekOfReferenceDate(
+        self, mock_get_specific_delivery_date: MagicMock
+    ):
+        self._set_parameter(key=ParameterKeys.DELIVERY_DAY, value=2)
+        member = MemberFactory.build()
+
+        result = MemberColumnProvider.get_value_member_delivery_date(
+            member, datetime.datetime(year=2031, month=4, day=19), {}
+        )
+
+        self.assertEqual("17.04.2031", result)
+        mock_get_specific_delivery_date.assert_called_once_with(
+            member_id=member.id,
+            delivery_date=datetime.date(year=2031, month=4, day=16),
+            cache=ANY,
+        )
+
+    def test_getValueMemberDeliveryAddress_separateDeliveryAddress_returnsDeliveryAddress(
+        self,
+    ):
+        member = MemberFactory.build(
+            street="Rechnungsstraße 1",
+            delivery_same_as_billing_address=False,
+            delivery_street="Lieferstraße 2",
+            delivery_street_2="Hinterhaus",
+            delivery_postcode="54321",
+            delivery_city="Lieferstadt",
+        )
+
+        self.assertEqual(
+            "Lieferstraße 2",
+            MemberColumnProvider.get_value_member_delivery_street(member, None, {}),
+        )
+        self.assertEqual(
+            "Hinterhaus",
+            MemberColumnProvider.get_value_member_delivery_street_2(member, None, {}),
+        )
+        self.assertEqual(
+            "54321",
+            MemberColumnProvider.get_value_member_delivery_postcode(member, None, {}),
+        )
+        self.assertEqual(
+            "Lieferstadt",
+            MemberColumnProvider.get_value_member_delivery_city(member, None, {}),
+        )
+
+    def test_getValueMemberDeliveryAddress_sameAsBillingAddress_returnsBillingAddress(
+        self,
+    ):
+        member = MemberFactory.build(
+            street="Rechnungsstraße 1",
+            street_2="",
+            postcode="12345",
+            city="Rechnungsstadt",
+            delivery_same_as_billing_address=True,
+            delivery_street="Lieferstraße 2",
+        )
+
+        self.assertEqual(
+            "Rechnungsstraße 1",
+            MemberColumnProvider.get_value_member_delivery_street(member, None, {}),
+        )
+        self.assertEqual(
+            "",
+            MemberColumnProvider.get_value_member_delivery_street_2(member, None, {}),
+        )
+        self.assertEqual(
+            "12345",
+            MemberColumnProvider.get_value_member_delivery_postcode(member, None, {}),
+        )
+        self.assertEqual(
+            "Rechnungsstadt",
+            MemberColumnProvider.get_value_member_delivery_city(member, None, {}),
+        )

@@ -3,7 +3,7 @@
 {% load configuration %}
 {% load django_bootstrap5 %}
 {% load i18n %}
-{% load tapir_static %}
+{% load static %}
 {% block head %}
     {% vite_asset 'configuration/configuration_entry.tsx' %}
 {% endblock head %}
@@ -20,7 +20,11 @@
                         <h4 style="padding-right: 0.8em">{% translate "Konfiguration" %}</h4>
                     </div>
                     <div style="margin-left:auto" id="search-input">
-                        <input type="text" class="form-control" placeholder="Search..." />
+                        <label for="parameter_search" class="visually-hidden">{% translate "Suche" %}</label>
+                        <input type="text"
+                               id="parameter_search"
+                               class="form-control"
+                               placeholder="Search..." />
                     </div>
                 </div>
                 <div id="config-view"
@@ -113,6 +117,7 @@
     <div id="payment-intended-use-config"
          data-contract-keys="{{ intended_use_contract_keys }}"
          data-coop-shares-keys="{{ intended_use_coop_shares_keys }}"
+         data-coop-shares-instalment-keys="{{ intended_use_coop_shares_instalment_keys }}"
          data-joker-keys="{{ intended_use_joker_keys }}"
          style="display:none"></div>
 {% endblock %}

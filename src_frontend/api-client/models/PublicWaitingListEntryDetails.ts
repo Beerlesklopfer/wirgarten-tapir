@@ -103,10 +103,16 @@ export interface PublicWaitingListEntryDetails {
   country: string;
   /**
    *
-   * @type {Date}
+   * @type {string}
    * @memberof PublicWaitingListEntryDetails
    */
-  birthdate?: Date;
+  pseudonym: string;
+  /**
+   *
+   * @type {string}
+   * @memberof PublicWaitingListEntryDetails
+   */
+  birthdate?: string;
   /**
    *
    * @type {string}
@@ -180,6 +186,7 @@ export function instanceOfPublicWaitingListEntryDetails(
   if (!("postcode" in value) || value["postcode"] === undefined) return false;
   if (!("city" in value) || value["city"] === undefined) return false;
   if (!("country" in value) || value["country"] === undefined) return false;
+  if (!("pseudonym" in value) || value["pseudonym"] === undefined) return false;
   if (
     !("numberOfCoopShares" in value) ||
     value["numberOfCoopShares"] === undefined
@@ -219,8 +226,8 @@ export function PublicWaitingListEntryDetailsFromJSONTyped(
     postcode: json["postcode"],
     city: json["city"],
     country: json["country"],
-    birthdate:
-      json["birthdate"] == null ? undefined : new Date(json["birthdate"]),
+    pseudonym: json["pseudonym"],
+    birthdate: json["birthdate"] == null ? undefined : json["birthdate"],
     accountOwner:
       json["account_owner"] == null ? undefined : json["account_owner"],
     iban: json["iban"] == null ? undefined : json["iban"],
@@ -274,10 +281,8 @@ export function PublicWaitingListEntryDetailsToJSONTyped(
     postcode: value["postcode"],
     city: value["city"],
     country: value["country"],
-    birthdate:
-      value["birthdate"] == null
-        ? undefined
-        : value["birthdate"].toISOString().substring(0, 10),
+    pseudonym: value["pseudonym"],
+    birthdate: value["birthdate"],
     account_owner: value["accountOwner"],
     iban: value["iban"],
     pickup_location_wishes:

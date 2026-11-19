@@ -1,5 +1,9 @@
-FROM node:lts-slim AS base
-RUN corepack enable
+FROM node:26-trixie-slim AS base
+RUN npm install -g --ignore-scripts pnpm@12.15.0 && \
+    apt-get update -y && apt-get --no-install-recommends install -y default-jre && \
+    rm -rf /var/lib/apt/lists/*
+ENV JAVA_HOME=/usr/lib/jvm/default-java
+
 # Set working directory
 WORKDIR /app
 
@@ -9,11 +13,8 @@ COPY \
     "./pnpm-lock.yaml" \
     "./pnpm-workspace.yaml" \
     ./
-RUN pnpm install
+RUN pnpm install --frozen-lockfile
 
-RUN apt-get update -y && apt-get --no-install-recommends install -y default-jre
-ENV JAVA_HOME /usr/lib/jvm/java-17-openjdk-amd64/
-
-CMD pnpm run dev
+CMD ["pnpm", "run", "dev"]
 
 # Note: vite.config.js and src code will be mounted via volumes

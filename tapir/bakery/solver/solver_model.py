@@ -1,6 +1,13 @@
 from ortools.sat.python import cp_model
 
 from tapir.bakery.solver.dataclasses import BreadInfo, PickupLocationInfo
+from tapir.bakery.solver.groups import (
+    group_max_pieces,
+    group_min_pieces,
+    limit_groups,
+    resolve_groups,
+    stove_groups,
+)
 
 
 def build_model(
@@ -17,6 +24,7 @@ def build_model(
     """
     model = cp_model.CpModel()
 
+    available_breads = resolve_groups(available_breads)
     bread_map = {b.bread_id: b for b in available_breads}
     bread_ids = list(bread_map.keys())
     total_deliveries = sum(loc.total_deliveries for loc in pickup_locations)
@@ -24,8 +32,23 @@ def build_model(
     if member_preferences is None:
         member_preferences = []
 
-    # 1. Stove layers: layer[sess, lay, b_id, qi] = 1 if bread b_id with
-    #    quantity option qi is assigned to this layer
+    # Stove units are what a layer is given to: a group, whose breads may
+    # share the layer, or an ungrouped bread. Fixed breads don't use the stove.
+    groups = stove_groups(available_breads)
+    grouped_bread_ids = {b.bread_id for members in groups.values() for b in members}
+    stove_units = [tuple(b.bread_id for b in members) for members in groups.values()]
+    stove_units += [
+        (b_id,)
+        for b_id in bread_ids
+        if bread_map[b_id].fixed_pieces is None and b_id not in grouped_bread_ids
+    ]
+    unit_options = [
+        sorted({qty for b_id in unit for qty in bread_map[b_id].pieces_per_stove_layer})
+        for unit in stove_units
+    ]
+
+    # 1. Stove layers: layer[sess, lay, u, qi] = 1 if stove unit u fills this
+    #    layer with unit_options[u][qi] pieces
     layer = {}
     layer_used = {}
     session_used = {}
@@ -33,14 +56,54 @@ def build_model(
         session_used[sess] = model.new_bool_var(f"sess_used_{sess}")
         for lay in range(stove_layers):
             layer_used[sess, lay] = model.new_bool_var(f"layer_used_{sess}_{lay}")
-            for b_id in bread_ids:
-                bread = bread_map[b_id]
-                if bread.fixed_pieces is not None:
-                    continue  # fixed breads don't use the stove
-                for qi in range(len(bread.pieces_per_stove_layer)):
-                    layer[sess, lay, b_id, qi] = model.new_bool_var(
-                        f"layer_{sess}_{lay}_{b_id}_{qi}"
+            for u in range(len(stove_units)):
+                for qi in range(len(unit_options[u])):
+                    layer[sess, lay, u, qi] = model.new_bool_var(
+                        f"layer_{sess}_{lay}_{u}_{qi}"
                     )
+
+    # pieces[sess, lay, b_id]: how many of the layer's pieces are bread b_id;
+    # on_layer[sess, lay, b_id]: whether there are any. For an ungrouped bread
+    # both are just expressions over its layer options.
+    pieces = {}
+    on_layer = {}
+    for sess in range(max_sessions):
+        for lay in range(stove_layers):
+            for u, unit in enumerate(stove_units):
+                options = unit_options[u]
+                unit_pieces = sum(
+                    qty * layer[sess, lay, u, qi] for qi, qty in enumerate(options)
+                )
+                if len(unit) == 1:
+                    (b_id,) = unit
+                    pieces[sess, lay, b_id] = unit_pieces
+                    on_layer[sess, lay, b_id] = sum(
+                        layer[sess, lay, u, qi] for qi in range(len(options))
+                    )
+                    continue
+                for b_id in unit:
+                    bread_options = bread_map[b_id].pieces_per_stove_layer
+                    pieces[sess, lay, b_id] = model.new_int_var(
+                        0, max(bread_options), f"pieces_{sess}_{lay}_{b_id}"
+                    )
+                    on_layer[sess, lay, b_id] = model.new_bool_var(
+                        f"on_layer_{sess}_{lay}_{b_id}"
+                    )
+                    model.add(pieces[sess, lay, b_id] >= 1).only_enforce_if(
+                        on_layer[sess, lay, b_id]
+                    )
+                    model.add(pieces[sess, lay, b_id] == 0).only_enforce_if(
+                        on_layer[sess, lay, b_id].negated()
+                    )
+                    # A shared layer holds a number of pieces every bread on it
+                    # allows.
+                    for qi, qty in enumerate(options):
+                        if qty not in bread_options:
+                            model.add_bool_or(
+                                on_layer[sess, lay, b_id].negated(),
+                                layer[sess, lay, u, qi].negated(),
+                            )
+                model.add(sum(pieces[sess, lay, b_id] for b_id in unit) == unit_pieces)
 
     total_baked = {}
     for b_id in bread_ids:
@@ -49,6 +112,8 @@ def build_model(
             lb = bread.fixed_pieces
             ub = bread.fixed_pieces
         else:
+            # For a grouped bread these are its settings for the day; C15
+            # bounds the group's total.
             lb = bread.min_pieces if bread.min_pieces is not None else 0
             ub = (
                 bread.max_pieces
@@ -137,16 +202,14 @@ def build_model(
             member_gets_bread[i, b_id] = model.new_bool_var(f"member_{i}_gets_{b_id}")
         valid_member_prefs.append((i, mp, valid_breads))
 
-    # C1: Each stove layer has at most one (bread, qty) assignment
+    # C1: Each stove layer has at most one (stove unit, qty) assignment
     for sess in range(max_sessions):
         for lay in range(stove_layers):
-            all_options = []
-            for b_id in bread_ids:
-                bread = bread_map[b_id]
-                if bread.fixed_pieces is not None:
-                    continue
-                for qi in range(len(bread.pieces_per_stove_layer)):
-                    all_options.append(layer[sess, lay, b_id, qi])
+            all_options = [
+                layer[sess, lay, u, qi]
+                for u in range(len(stove_units))
+                for qi in range(len(unit_options[u]))
+            ]
             model.add(sum(all_options) <= 1)
             model.add(layer_used[sess, lay] == sum(all_options))
 
@@ -169,12 +232,14 @@ def build_model(
         bread = bread_map[b_id]
         if bread.fixed_pieces is not None:
             continue
-        contributions = []
-        for sess in range(max_sessions):
-            for lay in range(stove_layers):
-                for qi, qty in enumerate(bread.pieces_per_stove_layer):
-                    contributions.append(qty * layer[sess, lay, b_id, qi])
-        model.add(total_baked[b_id] == sum(contributions))
+        model.add(
+            total_baked[b_id]
+            == sum(
+                pieces[sess, lay, b_id]
+                for sess in range(max_sessions)
+                for lay in range(stove_layers)
+            )
+        )
 
     # C5: Link bread_is_baked to total_baked
     for b_id in bread_ids:
@@ -220,10 +285,9 @@ def build_model(
         if bread.fixed_pieces is not None:
             continue
         for sess in range(max_sessions):
-            has_bread_in_sess = []
-            for lay in range(stove_layers):
-                for qi in range(len(bread.pieces_per_stove_layer)):
-                    has_bread_in_sess.append(layer[sess, lay, b_id, qi])
+            has_bread_in_sess = [
+                on_layer[sess, lay, b_id] for lay in range(stove_layers)
+            ]
             model.add(sum(has_bread_in_sess) >= 1).only_enforce_if(
                 bread_in_session[b_id, sess]
             )
@@ -290,14 +354,38 @@ def build_model(
             if claims:
                 model.add(sum(claims) <= distribution_vars[b_id, loc.location_id])
 
-    # Objective priority, highest first: fewest stove sessions, least session
-    # spanning, most members getting a preferred bread, least waste, most
-    # variety at the stations. The weight gaps make the ordering strict.
+    # C15: Every grouped bread's own min/max (not the day's) bounds its
+    #      group's total, a fixed amount outside the oven included
+    for members in limit_groups(available_breads).values():
+        group_total = sum(total_baked[b.bread_id] for b in members)
+        group_min = group_min_pieces(members)
+        group_max = group_max_pieces(members)
+        if group_min is not None:
+            model.add(group_total >= group_min)
+        if group_max is not None:
+            model.add(group_total <= group_max)
+
+    # Objective terms, by weight: fewest stove sessions, least session
+    # spanning, most members getting a preferred bread, least waste, fewest
+    # shared layers, most variety at the stations. The weights are exchange
+    # rates, not a strict priority: one session is worth 1000 satisfied
+    # members, one spanning bread 100 members, one member 100 loaves of waste,
+    # and one loaf of waste 10 points of variety. Splitting a bread is intended
+    # once it satisfies more than 100 additional members. A bread sharing a
+    # layer costs less than a loaf of waste and more than variety at 5
+    # stations: a group's layer is shared to save waste or to give members
+    # their favourite, but variety alone only pays for it when the extra bread
+    # reaches more than 5 stations, so the bakers don't get single-loaf splits.
+    #
+    # The spread is not part of it: _run_solver minimises it in a second solve
+    # that keeps this objective at its best value, so it only chooses among
+    # otherwise equal plans.
 
     SESSIONS_W = 10_000_000
     SPANNING_W = 1_000_000
     PREFERENCE_W = 10_000
     WASTE_W = 100
+    SHARING_W = 55
     VARIETY_W = 10
 
     total_sessions = sum(session_used[sess] for sess in range(max_sessions))
@@ -311,14 +399,44 @@ def build_model(
     total_waste = sum(remaining[b_id] for b_id in bread_ids)
     total_variety = sum(variety_count[loc.location_id] for loc in pickup_locations)
     total_members_satisfied = sum(member_satisfied.values()) if member_satisfied else 0
+    # Breads beyond the first on a layer, which only a group's layer can have.
+    # The group's own use of the layer, not layer_used: that is also 1 when
+    # another unit holds the layer, and would turn the penalty into a reward.
+    total_sharing = sum(
+        sum(on_layer[sess, lay, b_id] for b_id in unit)
+        - sum(layer[sess, lay, u, qi] for qi in range(len(unit_options[u])))
+        for u, unit in enumerate(stove_units)
+        if len(unit) > 1
+        for sess in range(max_sessions)
+        for lay in range(stove_layers)
+    )
+    # The spread: every station's count of every bread, squared. With a
+    # station's total fixed it is smallest when its loaves are shared out
+    # evenly, so middle counts win over 15 of one bread and 1 of the rest.
+    # count² is the line through (k, k²) and (k + 1, (k + 1)²) for every k:
+    # minimised, the square sits on the highest of them, which is count²
+    # exactly at whole counts, and the LP relaxation stays tight.
+    deliveries = {loc.location_id: loc.total_deliveries for loc in pickup_locations}
+    squares = []
+    for (b_id, loc_id), count in distribution_vars.items():
+        # C7 caps a count at the station's deliveries, and a capacity can be
+        # far larger.
+        max_count = min(capacities.get((b_id, loc_id), 0), deliveries[loc_id])
+        square = model.new_int_var(0, max_count * max_count, f"sq_{b_id}_{loc_id}")
+        for k in range(max_count):
+            model.add(square >= (2 * k + 1) * count - k * (k + 1))
+        squares.append(square)
+    total_spread = sum(squares)
 
-    model.maximize(
+    main_objective = (
         -SESSIONS_W * total_sessions
         - SPANNING_W * total_spanning
         + PREFERENCE_W * total_members_satisfied
         - WASTE_W * total_waste
         + VARIETY_W * total_variety
+        - SHARING_W * total_sharing
     )
+    model.maximize(main_objective)
 
     vars_dict = {
         "bread_map": bread_map,
@@ -326,7 +444,7 @@ def build_model(
         "pickup_locations": pickup_locations,
         "total_deliveries": total_deliveries,
         "distribution_vars": distribution_vars,
-        "layer": layer,
+        "pieces": pieces,
         "layer_used": layer_used,
         "session_used": session_used,
         "total_baked": total_baked,
@@ -338,6 +456,8 @@ def build_model(
         "member_satisfied": member_satisfied,
         "valid_member_prefs": valid_member_prefs,
         "total_member_prefs": len(valid_member_prefs),
+        "main_objective": main_objective,
+        "spread": total_spread,
     }
     return model, vars_dict
 
@@ -355,29 +475,22 @@ def extract_solution(value_fn, v: dict) -> dict:
     bread_quantities = {b_id: value_fn(v["total_baked"][b_id]) for b_id in bread_ids}
     remaining_quantities = {b_id: value_fn(v["remaining"][b_id]) for b_id in bread_ids}
 
+    stove_bread_ids = [
+        b_id for b_id in bread_ids if bread_map[b_id].fixed_pieces is None
+    ]
     stove_sessions = []
     for sess in range(max_sessions):
         if not value_fn(v["session_used"][sess]):
             continue
         session_layers = []
         for lay in range(stove_layers):
-            if not value_fn(v["layer_used"][sess, lay]):
-                session_layers.append(None)
-                continue
-            found = False
-            for b_id in bread_ids:
-                bread = bread_map[b_id]
-                if bread.fixed_pieces is not None:
-                    continue
-                for qi, qty in enumerate(bread.pieces_per_stove_layer):
-                    if value_fn(v["layer"][sess, lay, b_id, qi]):
-                        session_layers.append((b_id, qty))
-                        found = True
-                        break
-                if found:
-                    break
-            if not found:
-                session_layers.append(None)
+            breads_on_layer = []
+            if value_fn(v["layer_used"][sess, lay]):
+                for b_id in stove_bread_ids:
+                    qty = value_fn(v["pieces"][sess, lay, b_id])
+                    if qty > 0:
+                        breads_on_layer.append((b_id, qty))
+            session_layers.append(breads_on_layer)
         stove_sessions.append(session_layers)
 
     distribution: dict[tuple[int, int], int] = {}

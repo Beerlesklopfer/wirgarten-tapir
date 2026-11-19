@@ -2,9 +2,15 @@ import datetime
 from decimal import Decimal
 from typing import Set
 
+
 from tapir.associations.models import (
     AssociationMembershipTypePrice,
     AssociationMembership,
+)
+from tapir.bakery.models import (
+    Bread,
+    BreadCapacityPickupLocation,
+    BreadDelivery,
 )
 from tapir.configuration.parameter import get_parameter_value
 from tapir.deliveries.models import (
@@ -13,11 +19,18 @@ from tapir.deliveries.models import (
     DeliveryDonation,
     CustomCycleScheduledDeliveryWeek,
 )
-from tapir.payments.models import MemberPaymentRhythm, MemberCredit
+from tapir.payments.models import (
+    MemberPaymentRhythm,
+    MemberCredit,
+    PaymentExportExclusionPeriod,
+)
 from tapir.pickup_locations.models import PickupLocationDeliveryCharge
 from tapir.pickup_locations.models import ProductBasketSizeEquivalence
 from tapir.solidarity_contribution.models import SolidarityContribution
 from tapir.subscriptions.models import NoticePeriod
+from tapir.subscriptions.services.unconfirmed_changes_provider import (
+    UnconfirmedChangesProvider,
+)
 from tapir.utils.services.tapir_cache_manager import TapirCacheManager
 from tapir.utils.shortcuts import get_from_cache_or_compute
 from tapir.wirgarten.models import (
@@ -27,6 +40,7 @@ from tapir.wirgarten.models import (
     ProductPrice,
     PickupLocation,
     PickupLocationOpeningTime,
+    LocationRoute,
     CoopShareTransaction,
     ProductCapacity,
     GrowingPeriod,
@@ -65,6 +79,39 @@ class TapirCache:
             "all_solidarity_contributions",
             lambda: set(SolidarityContribution.objects.select_related("member")),
         )
+
+    @classmethod
+    def get_all_subscriptions_for_member(
+        cls, member_id: str, cache: dict
+    ) -> list[Subscription]:
+        key = "all_subscriptions_by_member_id"
+        TapirCacheManager.register_key_in_category(
+            cache=cache, key=key, category=TapirCacheManager.CATEGORY_SUBSCRIPTIONS
+        )
+
+        def compute():
+            result = {}
+            for subscription in cls.get_all_subscriptions(cache=cache):
+                result.setdefault(subscription.member_id, []).append(subscription)
+            return result
+
+        subscriptions_by_member_id = get_from_cache_or_compute(cache, key, compute)
+        return subscriptions_by_member_id.get(member_id, [])
+
+    @classmethod
+    def get_all_solidarity_contributions_for_member(
+        cls, member_id: str, cache: dict
+    ) -> list[SolidarityContribution]:
+        def compute():
+            result = {}
+            for contribution in cls.get_all_solidarity_contributions(cache=cache):
+                result.setdefault(contribution.member_id, []).append(contribution)
+            return result
+
+        contributions_by_member_id = get_from_cache_or_compute(
+            cache, "all_solidarity_contributions_by_member_id", compute
+        )
+        return contributions_by_member_id.get(member_id, [])
 
     @classmethod
     def get_subscriptions_active_at_date(
@@ -117,14 +164,20 @@ class TapirCache:
         )
 
         def compute():
-            from tapir.wirgarten.service.products import (
-                get_active_and_future_subscriptions,
+            active_and_future_subscriptions = sorted(
+                (
+                    subscription
+                    for subscription in cls.get_all_subscriptions(cache)
+                    if subscription.end_date >= reference_date
+                ),
+                key=lambda subscription: (
+                    subscription.product.type.order_in_bestellwizard,
+                    subscription.product.name,
+                ),
             )
 
             subscriptions_by_member_id: dict[str, list[Subscription]] = {}
-            for subscription in get_active_and_future_subscriptions(
-                reference_date=reference_date, cache=cache
-            ):
+            for subscription in active_and_future_subscriptions:
                 if subscription.member_id not in subscriptions_by_member_id:
                     subscriptions_by_member_id[subscription.member_id] = []
                 subscriptions_by_member_id[subscription.member_id].append(subscription)
@@ -315,20 +368,43 @@ class TapirCache:
         )
 
     @classmethod
-    def get_pickup_location_by_id(cls, cache: dict, pickup_location_id):
+    def get_pickup_location_by_id(
+        cls, cache: dict, pickup_location_id: str | None
+    ) -> PickupLocation | None:
         if pickup_location_id is None:
             return None
 
-        def compute():
-            return {
+        return cls._get_pickup_locations_by_id(cache=cache).get(
+            pickup_location_id, None
+        )
+
+    @classmethod
+    def get_all_pickup_locations(cls, cache: dict) -> list[PickupLocation]:
+        return list(cls._get_pickup_locations_by_id(cache=cache).values())
+
+    @classmethod
+    def _get_pickup_locations_by_id(cls, cache: dict) -> dict[str, PickupLocation]:
+        return get_from_cache_or_compute(
+            cache,
+            "pickup_location_by_id",
+            lambda: {
                 pickup_location.id: pickup_location
                 for pickup_location in PickupLocation.objects.all()
-            }
-
-        pickup_location_by_id_cache = get_from_cache_or_compute(
-            cache, "pickup_location_by_id", lambda: compute()
+            },
         )
-        return pickup_location_by_id_cache.get(pickup_location_id, None)
+
+    @classmethod
+    def get_location_route_by_id(
+        cls, cache: dict, location_route_id: str
+    ) -> LocationRoute | None:
+        return get_from_cache_or_compute(
+            cache,
+            "location_route_by_id",
+            lambda: {
+                location_route.id: location_route
+                for location_route in LocationRoute.objects.all()
+            },
+        ).get(location_route_id, None)
 
     @classmethod
     def get_product_by_id(cls, cache: dict, product_id):
@@ -374,7 +450,7 @@ class TapirCache:
         )
 
     @classmethod
-    def get_delivery_day_by_pickup_location_id(cls, cache: Dict) -> Dict:
+    def get_delivery_day_by_pickup_location_id(cls, cache: dict) -> dict:
         def compute():
             delivery_days = {}
             for (
@@ -412,39 +488,44 @@ class TapirCache:
         return get_from_cache_or_compute(
             cache,
             "unconfirmed_coop_share_purchases",
-            lambda: list(
-                CoopShareTransaction.objects.filter(
-                    admin_confirmed__isnull=True,
-                    transaction_type=CoopShareTransaction.CoopShareTransactionType.PURCHASE,
-                )
-            ),
+            lambda: list(UnconfirmedChangesProvider.get_unconfirmed_share_purchases()),
         )
 
     @classmethod
     def get_product_type_capacity_at_date(
         cls, cache: dict, product_type: ProductType, reference_date: datetime.date
     ):
+        return cls.get_product_type_capacity_at_date_by_id(
+            cache=cache, product_type_id=product_type.id, reference_date=reference_date
+        )
+
+    @classmethod
+    def get_product_type_capacity_at_date_by_id(
+        cls, cache: dict, product_type_id: str, reference_date: datetime.date
+    ):
         def compute_full():
             result = {}
             for product_capacity in ProductCapacity.objects.all().select_related(
                 "period", "product_type"
             ):
-                result.setdefault(product_capacity.period, {})[
-                    product_capacity.product_type
+                result.setdefault(product_capacity.period_id, {})[
+                    product_capacity.product_type_id
                 ] = product_capacity
             return result
 
-        product_type_capacities_by_growing_period = get_from_cache_or_compute(
-            cache, "product_type_capacities_by_growing_period", compute_full
+        product_type_capacities_by_growing_period_id = get_from_cache_or_compute(
+            cache, "product_type_capacities_by_growing_period_id", compute_full
         )
 
         growing_period = TapirCache.get_growing_period_at_date(
             reference_date=reference_date, cache=cache
         )
+        if growing_period is None:
+            return None
 
-        return product_type_capacities_by_growing_period.get(growing_period, {}).get(
-            product_type, None
-        )
+        return product_type_capacities_by_growing_period_id.get(
+            growing_period.id, {}
+        ).get(product_type_id, None)
 
     @classmethod
     def get_all_growing_periods_ascending(cls, cache: dict):
@@ -600,14 +681,16 @@ class TapirCache:
         )
 
         def compute() -> Decimal:
-            contributions = cls.get_solidarity_contributions_active_at_date(
-                reference_date=reference_date, cache=cache
+            contributions = cls.get_all_solidarity_contributions_for_member(
+                member_id=member_id, cache=cache
             )
             return sum(
                 (
                     contribution.amount
                     for contribution in contributions
-                    if contribution.member_id == member_id
+                    if contribution.start_date
+                    <= reference_date
+                    <= contribution.end_date
                 ),
                 start=Decimal(0),
             )
@@ -771,6 +854,22 @@ class TapirCache:
         return credits_by_member_cache.get(member_id, [])
 
     @classmethod
+    def get_payment_export_exclusion_periods_for_member(
+        cls, member_id: str, cache: dict
+    ) -> list[PaymentExportExclusionPeriod]:
+        def compute():
+            periods_by_member_id: dict[str, list[PaymentExportExclusionPeriod]] = {}
+            for period in PaymentExportExclusionPeriod.objects.order_by("start_date"):
+                periods_by_member_id.setdefault(period.member_id, []).append(period)
+            return periods_by_member_id
+
+        return get_from_cache_or_compute(
+            cache=cache,
+            key="payment_export_exclusion_periods_by_member_id",
+            compute_function=compute,
+        ).get(member_id, [])
+
+    @classmethod
     def get_association_membership_type_prices(
         cls, type_id: str, cache: dict
     ) -> list[AssociationMembershipTypePrice]:
@@ -907,3 +1006,46 @@ class TapirCache:
             key="coop_share_transaction_by_member_id",
             compute_function=compute,
         ).get(member_id, [])
+
+    @classmethod
+    def get_member_ids_with_bread_delivery_in_week(
+        cls, cache: dict, year: int, delivery_week: int
+    ) -> set[str]:
+        def compute():
+            deliveries = BreadDelivery.objects.filter(
+                year=year, delivery_week=delivery_week
+            )
+            return set(deliveries.values_list("subscription__member_id", flat=True))
+
+        member_ids_by_week = get_from_cache_or_compute(
+            cache, "member_ids_with_bread_delivery_by_week", lambda: {}
+        )
+        return get_from_cache_or_compute(
+            member_ids_by_week, (year, delivery_week), compute
+        )
+
+    @classmethod
+    def get_breads_with_capacity_by_pickup_location_id(
+        cls, cache: dict, year: int, delivery_week: int
+    ) -> dict[str, list[Bread]]:
+        def compute():
+            capacities = (
+                BreadCapacityPickupLocation.objects.filter(
+                    year=year, delivery_week=delivery_week, capacity__gt=0
+                )
+                .select_related("bread")
+                .prefetch_related("bread__contents__ingredient")
+                .order_by("bread__name")
+            )
+
+            breads_by_pickup_location_id = {}
+            for capacity in capacities:
+                breads_by_pickup_location_id.setdefault(
+                    capacity.pickup_location_id, []
+                ).append(capacity.bread)
+            return breads_by_pickup_location_id
+
+        breads_by_week = get_from_cache_or_compute(
+            cache, "breads_with_capacity_by_pickup_location_id_by_week", lambda: {}
+        )
+        return get_from_cache_or_compute(breads_by_week, (year, delivery_week), compute)

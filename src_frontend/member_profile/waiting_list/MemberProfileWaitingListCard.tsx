@@ -7,12 +7,12 @@ import { handleRequestError } from "../../utils/handleRequestError.ts";
 
 interface MemberProfileWaitingListCardProps {
   memberId: string;
-  adminEmail: string;
+  contactEmail: string;
 }
 
 const MemberProfileWaitingListCard: React.FC<
   MemberProfileWaitingListCardProps
-> = ({ memberId, adminEmail }) => {
+> = ({ memberId, contactEmail }) => {
   const [waitingListEntry, setWaitingListEntry] =
     useState<WaitingListEntryDetails>();
   const [loading, setLoading] = useState(true);
@@ -27,11 +27,8 @@ const MemberProfileWaitingListCard: React.FC<
       .then((result) => {
         setWaitingListEntry(result.entry);
       })
-      .catch(async (error) => {
-        await handleRequestError(
-          error,
-          "Fehler beim Laden des Wartelisteneintrags.",
-        );
+      .catch((error) => {
+        handleRequestError(error, "Fehler beim Laden des Wartelisteneintrags.");
       })
       .finally(() => setLoading(false));
   }, [memberId]);
@@ -99,7 +96,8 @@ const MemberProfileWaitingListCard: React.FC<
           <Row>
             <p>
               Möchtest du deine Wartelisteneinträge verändern, dann wende dich
-              bitte an <a href={"mailto:" + adminEmail}>{adminEmail}</a>.
+              bitte an die Verwaltung (
+              <a href={"mailto:" + contactEmail}>{contactEmail}</a>).
             </p>
           </Row>
         </Card.Body>

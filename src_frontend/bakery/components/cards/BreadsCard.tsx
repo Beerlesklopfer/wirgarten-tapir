@@ -20,9 +20,15 @@ import { LabelsModal } from "../modals/LabelsModal";
 
 interface BreadsCardProps {
   csrfToken: string;
+  groupsVersion: number;
+  onBreadsChanged: () => void;
 }
 
-export const BreadsCard: React.FC<BreadsCardProps> = ({ csrfToken }) => {
+export const BreadsCard: React.FC<BreadsCardProps> = ({
+  csrfToken,
+  groupsVersion,
+  onBreadsChanged,
+}) => {
   const bakeryApi = useApi(BakeryApi, csrfToken);
   const [breads, setBreads] = useState<BreadList[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,7 +42,7 @@ export const BreadsCard: React.FC<BreadsCardProps> = ({ csrfToken }) => {
 
   useEffect(() => {
     loadBreads();
-  }, []);
+  }, [groupsVersion]);
 
   const loadBreads = () => {
     setLoading(true);
@@ -123,6 +129,7 @@ export const BreadsCard: React.FC<BreadsCardProps> = ({ csrfToken }) => {
     promise
       .then(() => {
         loadBreads();
+        onBreadsChanged();
         setShowBreadModal(false);
         setEditingBread(null);
       })
@@ -228,22 +235,24 @@ export const BreadsCard: React.FC<BreadsCardProps> = ({ csrfToken }) => {
                   className="list-group-item px-0 d-flex justify-content-between align-items-start border-0 list-item-transparent"
                 >
                   <div className="d-flex gap-3 flex-grow-1">
-                    <div
+                    <button
+                      type="button"
                       className="bread-list-image"
                       onClick={() => handleImageClick(bread.id!)}
                       title="Bild ändern"
+                      aria-label="Bild ändern"
                     >
                       {bread.picture ? (
                         <img src={bread.picture} alt={bread.name} />
                       ) : (
-                        <div className="bread-list-placeholder">
+                        <span className="bread-list-placeholder">
                           <EggFried
                             size={28}
                             className="icon-bakery-primary-darker"
                           />
-                        </div>
+                        </span>
                       )}
-                      <div
+                      <span
                         className="bread-image-overlay"
                         style={{
                           position: "absolute",
@@ -283,8 +292,8 @@ export const BreadsCard: React.FC<BreadsCardProps> = ({ csrfToken }) => {
                             transition: "opacity 0.2s",
                           }}
                         />
-                      </div>
-                    </div>
+                      </span>
+                    </button>
                     <input
                       type="file"
                       accept="image/*"
@@ -307,6 +316,14 @@ export const BreadsCard: React.FC<BreadsCardProps> = ({ csrfToken }) => {
                         <h6 className="mb-0">{bread.name}</h6>
                         {!bread.isActive && (
                           <span className="badge bg-secondary">inaktiv</span>
+                        )}
+                        {bread.groupName && (
+                          <span
+                            className="badge badge-bakery-brown"
+                            title="Gruppe"
+                          >
+                            {bread.groupName}
+                          </span>
                         )}
                       </div>
                       <small className="text-muted d-block mb-1">

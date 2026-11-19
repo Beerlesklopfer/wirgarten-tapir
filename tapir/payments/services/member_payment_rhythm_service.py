@@ -18,8 +18,6 @@ from tapir.wirgarten.utils import get_today
 
 
 class MemberPaymentRhythmService:
-    RELATIVE_DELTA_ONE_MONTH = relativedelta(months=1)
-
     @staticmethod
     def get_member_payment_rhythm(
         member: Member, reference_date: datetime.date, cache: dict
@@ -100,7 +98,7 @@ class MemberPaymentRhythmService:
         while not cls.is_start_of_rhythm_period(
             rhythm=rhythm, reference_date=reference_date, cache=cache
         ):
-            reference_date = reference_date - cls.RELATIVE_DELTA_ONE_MONTH
+            reference_date = reference_date - relativedelta(months=1)
         return reference_date
 
     @classmethod
@@ -169,7 +167,7 @@ class MemberPaymentRhythmService:
     @classmethod
     def get_rhythm_from_display_name(cls, display_name: str) -> str:
         for choice in MemberPaymentRhythm.Rhythm.choices:
-            if choice[1] == display_name:
+            if choice[1].casefold() == display_name.strip().casefold():
                 return choice[0]
         raise TapirImproperlyConfigured(
             f"Unknown display name for payment rhythm: {display_name}"

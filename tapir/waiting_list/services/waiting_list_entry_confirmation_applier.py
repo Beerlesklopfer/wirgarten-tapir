@@ -18,6 +18,9 @@ from tapir.coop.services.member_number_service import MemberNumberService
 from tapir.payments.services.member_payment_rhythm_service import (
     MemberPaymentRhythmService,
 )
+from tapir.pickup_locations.services.member_delivery_address_setter import (
+    MemberDeliveryAddressSetter,
+)
 from tapir.pickup_locations.services.member_pickup_location_setter import (
     MemberPickupLocationSetter,
 )
@@ -145,6 +148,7 @@ class WaitingListEntryConfirmationApplier:
                 subscriptions=new_subscriptions,
                 cache=cache,
                 actor=actor,
+                pay_in_instalments=validated_data["pay_coop_shares_in_instalments"],
             )
 
         if len(new_subscriptions) > 0:
@@ -204,6 +208,7 @@ class WaitingListEntryConfirmationApplier:
             country=waiting_list_entry.country,
             account_owner=validated_data["account_owner"],
             iban=validated_data["iban"],
+            pseudonym=waiting_list_entry.pseudonym,
             **contracts_signed,
         )
 
@@ -212,14 +217,12 @@ class WaitingListEntryConfirmationApplier:
         )
 
         KeycloakUserManager.create_keycloak_user_if_necessary(
-            user=member, initial_password=None, cache=cache
+            user=member, initial_password=None
         )
         try:
-            EmailVerificationService.send_verification_email(
-                user=member, actor=member, cache=cache
-            )
+            EmailVerificationService.send_verification_email(user=member, actor=member)
         except KeycloakPutError:
-            KeycloakUserDeleteService.delete_user_if_exists(user=member, cache=cache)
+            KeycloakUserDeleteService.delete_user_if_exists(user=member)
             raise
 
         return member
@@ -270,6 +273,11 @@ class WaitingListEntryConfirmationApplier:
         if pickup_location_wish is None:
             return
 
+        if pickup_location_wish.pickup_location.is_home_delivery:
+            cls.copy_delivery_address(
+                waiting_list_entry=waiting_list_entry, member=member, actor=actor
+            )
+
         MemberPickupLocationSetter.link_member_to_pickup_location(
             pickup_location_wish.pickup_location_id,
             member=member,
@@ -277,3 +285,12 @@ class WaitingListEntryConfirmationApplier:
             actor=actor,
             cache=cache,
         )
+
+    @classmethod
+    def copy_delivery_address(
+        cls, waiting_list_entry: WaitingListEntry, member: Member, actor: TapirUser
+    ):
+        MemberDeliveryAddressSetter.copy_delivery_address(
+            source=waiting_list_entry, target=member
+        )
+        MemberDeliveryAddressSetter.save_delivery_address(member=member, actor=actor)

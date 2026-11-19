@@ -15,6 +15,7 @@ class ParameterKeys:
     SITE_ADMIN_IMAGE = f"{PREFIX}.site.admin_image"
     SITE_PRIVACY_LINK = f"{PREFIX}.site.privacy_link"
     SITE_FAQ_LINK = f"{PREFIX}.site.faq_link"
+    SITE_WEBSITE_LINK = f"{PREFIX}.site.website_link"
     COOP_MIN_SHARES = f"{PREFIX}.coop.min_shares"
     COOP_SHARE_PRICE = f"{PREFIX}.coop.share_price"
     COOP_STATUTE_LINK = f"{PREFIX}.coop.statute_link"
@@ -23,6 +24,8 @@ class ParameterKeys:
     COOP_THRESHOLD_WARNING_ON_MANY_COOP_SHARES_BOUGHT = (
         f"{PREFIX}.coop.threshold_warning_on_many_coop_shares_bought"
     )
+    COOP_SHARES_INSTALMENTS_ENABLED = f"{PREFIX}.coop.instalments_enabled"
+    COOP_SHARES_INSTALMENT_AMOUNT = f"{PREFIX}.coop.instalment_amount"
     CHICKEN_MAX_SHARES = f"{PREFIX}.chicken.max_shares"
     SUPPLIER_LIST_PRODUCT_TYPES = f"{PREFIX}.supplier_list.product_types"
     SUPPLIER_LIST_SEND_ADMIN_EMAIL = f"{PREFIX}.supplier_list.admin_email_enabled"
@@ -34,12 +37,18 @@ class ParameterKeys:
     PAYMENT_DEFAULT_RHYTHM = f"{PREFIX}.payment.default_rhythm"
     PAYMENT_ALLOWED_RHYTHMS = f"{PREFIX}.payment.allowed_rhythms"
     PAYMENT_START_DATE = f"{PREFIX}.payment.start_date"
+    PAYMENT_PARTIAL_MONTH_PROPORTIONAL_START_DATE = (
+        f"{PREFIX}.payment.partial_month_proportional_start_date"
+    )
     PAYMENT_ORGANISATION_IBAN = f"{PREFIX}.payment.organisation_iban"
     PAYMENT_ORGANISATION_BIC = f"{PREFIX}.payment.organisation_bic"
     PAYMENT_CREDITOR_IDENTIFIER = f"{PREFIX}.payment.creditor_identifier"
     PAYMENT_MANDATE_REFERENCE_PATTERN = f"{PREFIX}.payment.mandate_reference.pattern"
     PAYMENT_INTENDED_USE_ENABLE_CUSTOM = f"{PREFIX}.payment.intended_use.enable_custom"
     PAYMENT_INTENDED_USE_COOP_SHARES = f"{PREFIX}.payment.intended_use.coop_shares"
+    PAYMENT_INTENDED_USE_COOP_SHARES_INSTALMENT = (
+        f"{PREFIX}.payment.intended_use.coop_shares_instalment"
+    )
     PAYMENT_INTENDED_USE_MONTHLY_INVOICE = (
         f"{PREFIX}.payment.intended_use.monthly_invoice"
     )
@@ -52,9 +61,11 @@ class ParameterKeys:
     PAYMENT_INTENDED_USE_MULTIPLE_MONTH_INVOICE = (
         f"{PREFIX}.payment.intended_use.multiple_month_invoice"
     )
+    PAYMENT_INTENDED_USE_LAST_INVOICE = f"{PREFIX}.payment.intended_use.last_invoice"
     PAYMENT_INTENDED_USE_JOKER_CREDIT = f"{PREFIX}.payment.intended_use.joker_credit"
     PAYMENT_SEND_CSV_FILE_PER_MAIL = f"{PREFIX}.payment.send_csv_file_per_mail"
     PAYMENT_SEND_XML_FILE_PER_MAIL = f"{PREFIX}.payment.send_xml_file_per_mail"
+    PAYMENT_EXPORT_EXCLUSION_ENABLED = f"{PREFIX}.payment.export_exclusion_enabled"
     MEMBERS_CAN_SEE_OWN_PAYMENTS = (
         f"{PREFIX}.member.dashboard.members_can_see_own_payments"
     )
@@ -63,6 +74,12 @@ class ParameterKeys:
     )
     MEMBERS_CAN_CHANGE_PICKUP_LOCATION = (
         f"{PREFIX}.member.dashboard.members_can_change_pickup_location"
+    )
+    MEMBER_DASHBOARD_PICKUP_LOCATION_LABEL = (
+        f"{PREFIX}.member.dashboard.pickup_location_label"
+    )
+    MEMBER_DELIVERY_ADDRESS_CHANGE_WARNING_TEXT = (
+        f"{PREFIX}.member.dashboard.delivery_address_change_warning_text"
     )
     DELIVERY_DAY = f"{PREFIX}.delivery.weekday"
     DELIVERY_CHARGE_PER_PICKUP_LOCATION_ENABLED = (
@@ -95,6 +112,9 @@ class ParameterKeys:
     MEMBER_CANCELLATION_REASON_CHOICES = f"{PREFIX}.member.cancellation_reason.choices"
     JOKERS_ENABLED = f"{PREFIX}.jokers.enabled"
     JOKERS_CREATE_MEMBER_CREDITS = f"{PREFIX}.jokers.create_member_credits"
+    JOKERS_SOLIDARITY_CONTRIBUTION_PRODUCT_TYPE = (
+        f"{PREFIX}.jokers.solidarity_contribution_product_type"
+    )
     DELIVERY_DONATION_MODE = f"{PREFIX}.delivery_donation.mode"
     DELIVERY_DONATION_FORWARD_TO_PICKUP_LOCATION = (
         f"{PREFIX}.delivery_donation.forward_to_pickup_location"
@@ -133,6 +153,7 @@ class ParameterKeys:
 
     SOLIDARITY_CHOICES = f"{PREFIX}.solidarity.choices"
     SOLIDARITY_DEFAULT = f"{PREFIX}.solidarity.default"
+    SOLIDARITY_MINIMUM = f"{PREFIX}.solidarity.minimum"
     # the following two are still named "HARVEST_" for backward compatibility but now belong to the category SOLIDARITY
     HARVEST_NEGATIVE_SOLIPRICE_ENABLED = f"{PREFIX}.harvest.negative_soliprice_enabled"
     HARVEST_MEMBERS_ARE_ALLOWED_TO_CHANGE_SOLIPRICE = (
@@ -140,7 +161,6 @@ class ParameterKeys:
     )
     BESTELLWIZARD_FORCE_WAITING_LIST = f"{PREFIX}.bestellwizard.force_waiting_list"
     BESTELLWIZARD_SHOW_INTRO = f"{PREFIX}.bestellwizard.show_intro"
-    BESTELLWIZARD_INTRO_TEXT = f"{PREFIX}.bestellwizard.intro_text"
     BESTELL_WIZARD_SOLIDARITY_STEP_POSITION = (
         f"{PREFIX}.bestellwizard.solidarity_step_position"
     )
@@ -190,6 +210,9 @@ class ParameterKeys:
     BESTELL_WIZARD_STEP4B_WAITING_LIST_MODAL_TEXT = (
         f"{PREFIX}.bestellwizard.step4b.waiting_list_modal.text"
     )
+    BESTELLWIZARD_STEP4B_BASE_PRICE_LABEL = (
+        f"{PREFIX}.bestellwizard.step4b.base_price_label"
+    )
     BESTELLWIZARD_STEP4D_TITLE = f"{PREFIX}.bestellwizard.step4d.title"
     BESTELLWIZARD_STEP4D_TEXT = f"{PREFIX}.bestellwizard.step4d.text"
     BESTELLWIZARD_STEP4D_TEXT_SUPPORTING_MEMBER = (
@@ -201,11 +224,17 @@ class ParameterKeys:
     BESTELLWIZARD_STEP5A_TITLE = f"{PREFIX}.bestellwizard.step5a.title"
     BESTELLWIZARD_STEP5A_TEXT = f"{PREFIX}.bestellwizard.step5a.text"
     BESTELLWIZARD_STEP5B_TITLE = f"{PREFIX}.bestellwizard.step5b.title"
+    BESTELLWIZARD_STEP5B_HOME_DELIVERY_TITLE = (
+        f"{PREFIX}.bestellwizard.step5b.home_delivery_title"
+    )
     BESTELLWIZARD_STEP5_BACKGROUND_IMAGE = (
         f"{PREFIX}.bestellwizard.step5.background_image"
     )
     BESTELLWIZARD_STEP5C_TITLE = f"{PREFIX}.bestellwizard.step5c.title"
     BESTELLWIZARD_STEP5C_TEXT = f"{PREFIX}.bestellwizard.step5c.text"
+    BESTELLWIZARD_HOME_DELIVERY_CHOICE_TEXT = (
+        f"{PREFIX}.bestellwizard.home_delivery_choice.text"
+    )
     BESTELLWIZARD_STEP6A_TITLE = f"{PREFIX}.bestellwizard.step6a.title"
     BESTELLWIZARD_STEP6A_TEXT = f"{PREFIX}.bestellwizard.step6a.text"
     BESTELLWIZARD_STEP6_BACKGROUND_IMAGE = (
@@ -221,7 +250,6 @@ class ParameterKeys:
     BESTELLWIZARD_STEP6C_CHECKBOX_STATUTE = (
         f"{PREFIX}.bestellwizard.step6c.checkbox_statute"
     )
-    BESTELLWIZARD_STEP6C_TEXT_STATUTE = f"{PREFIX}.bestellwizard.step6c.text_statute"
     BESTELLWIZARD_STEP6C_CHECKBOX_COMMITMENT = (
         f"{PREFIX}.bestellwizard.step6c.checkbox_commitment"
     )
@@ -265,6 +293,9 @@ class ParameterKeys:
     )
     BESTELLWIZARD_STEP14B_TITLE = f"{PREFIX}.bestellwizard.step14b.title"
     BESTELLWIZARD_STEP14B_TEXT = f"{PREFIX}.bestellwizard.step14b.text"
+    BESTELLWIZARD_STEP14_BACK_TO_WEBSITE_BUTTON_TEXT = (
+        f"{PREFIX}.bestellwizard.step14.back_to_website_button_text"
+    )
     ALLOW_STUDENT_TO_ORDER_WITHOUT_COOP_SHARES = (
         f"{PREFIX}.coop.allow_students_to_order_without_coop_shares"
     )
@@ -283,7 +314,6 @@ class ParameterKeys:
     BCC_MAIL_MODULE_TRANSACTIONAL_MAILS = (
         f"{PREFIX}.emails.bcc_mail_module_transactional_mails"
     )
-    BAKERY_ENABLED = f"{PREFIX}.bakery.enabled"
     BAKERY_BAKING_DAY_BEFORE_DELIVERY_DAY = (
         f"{PREFIX}.bakery.baking_day_before_delivery_day"
     )

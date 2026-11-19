@@ -3,6 +3,11 @@ import React, { useEffect, useState } from "react";
 import { Form, Modal, Spinner } from "react-bootstrap";
 import { v4 as uuidv4 } from "uuid";
 import { CoopApi } from "../../api-client";
+import {
+  emailsMatch,
+  shouldShowEmailMismatchWarning,
+} from "../../bestell_wizard/utils/emailsMatch.ts";
+import { isEmailValid } from "../../bestell_wizard/utils/isEmailValid.ts";
 import { isPersonalDataValidShort } from "../../bestell_wizard_mobile/utils/isPersonalDataValidShort.ts";
 import TapirButton from "../../components/TapirButton.tsx";
 import TapirHelpButton from "../../components/TapirHelpButton.tsx";
@@ -10,11 +15,6 @@ import { useApi } from "../../hooks/useApi.ts";
 import { ToastData } from "../../types/ToastData.ts";
 import { addToast } from "../../utils/addToast.ts";
 import { handleRequestError } from "../../utils/handleRequestError.ts";
-import { isEmailValid } from "../../bestell_wizard/utils/isEmailValid.ts";
-import {
-  emailsMatch,
-  shouldShowEmailMismatchWarning,
-} from "../../bestell_wizard/utils/emailsMatch.ts";
 
 interface MemberPersonalDataModalProps {
   memberId: string;
@@ -68,7 +68,7 @@ const MemberPersonalDataModal: React.FC<MemberPersonalDataModalProps> = ({
     <>
       Die Änderung deiner E-Mail-Adresse muss durch dich selbst bestätigt
       werden. Folge den Anweisungen, die du an deine alte E-Mail-Adresse
-      erhältst. Wenn du keine Mail erhältst, dann wende dich an deinen Betrieb (
+      erhältst. Wenn du keine Mail erhältst, dann wende dich an die Verwaltung (
       <a href={`mailto:${contactEmail}`}>{contactEmail}</a>).
     </>
   );

@@ -1,4 +1,7 @@
 import datetime
+from unittest.mock import patch
+
+from django.test import override_settings
 
 from tapir.bakery.models import (
     AvailableBreadsForDeliveryDay,
@@ -13,7 +16,6 @@ from tapir.bakery.models import (
 from tapir.bakery.services.bread_delivery_context_service import (
     BreadDeliveryContextService,
 )
-from tapir.configuration.models import TapirParameter
 from tapir.pickup_locations.services.pickup_location_delivery_day_service import (
     PickupLocationDeliveryDayService,
 )
@@ -30,7 +32,6 @@ from tapir.wirgarten.models import (
     Product,
     ProductType,
 )
-from tapir.wirgarten.parameter_keys import ParameterKeys
 from tapir.wirgarten.parameters import ParameterDefinitions
 from tapir.wirgarten.tests.factories import (
     GrowingPeriodFactory,
@@ -41,6 +42,7 @@ from tapir.wirgarten.tests.factories import (
 from tapir.wirgarten.tests.test_utils import TapirIntegrationTest
 
 
+@override_settings(BAKERY_ENABLED=True)
 class TestBakeryGenerator(TapirIntegrationTest):
     @classmethod
     def setUpTestData(cls):
@@ -66,14 +68,6 @@ class TestBakeryGenerator(TapirIntegrationTest):
         for bread in Bread.objects.all():
             self.assertTrue(bread.pieces_per_stove_layer)
             self.assertGreater(bread.weight, 0)
-
-    def test_generateMasterdata_switchesTheBakeryOn(self):
-        BakeryGenerator.generate_masterdata()
-
-        self.assertEqual(
-            TapirParameter.objects.get(key=ParameterKeys.BAKERY_ENABLED).value,
-            "True",
-        )
 
     def test_generateProductsBakery_createsTheWeeklyBreadShare(self):
         ProductGenerator.generate_products_bakery()
@@ -163,6 +157,7 @@ class TestBakeryGenerator(TapirIntegrationTest):
                 ).exists(),
             )
 
+    @patch.object(BakeryGenerator, "SHARE_OF_MEMBERS_WITH_PREFERENCES", 1.0)
     def test_generateWeekData_givesMembersFavourites(self):
         pickup_location = create_pickup_location_with_opening_times(
             [4], name="Hofladen"
@@ -185,11 +180,7 @@ class TestBakeryGenerator(TapirIntegrationTest):
             end_date=datetime.date.fromisocalendar(year, week, 7),
         )
 
-        BakeryGenerator.SHARE_OF_MEMBERS_WITH_PREFERENCES = 1.0
-        try:
-            BakeryGenerator.generate_week_data()
-        finally:
-            BakeryGenerator.SHARE_OF_MEMBERS_WITH_PREFERENCES = 0.6
+        BakeryGenerator.generate_week_data()
 
         preferred = PreferredBread.objects.get(member=member)
         self.assertGreaterEqual(preferred.breads.count(), 1)

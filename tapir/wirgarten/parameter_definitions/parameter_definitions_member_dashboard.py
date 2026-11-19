@@ -219,10 +219,37 @@ class ParameterDefinitionsMemberDashboard:
             description="Im Mitgliederbereich können Mitglieder deren eigenen Abholort selber ändern. "
             "Wenn dieses Parameter ausgeschaltet ist, können die Mitglieder ihren Abholort nicht mehr selber anpassen. "
             "Den Mitgliedern wird im Mitgliederbereich über einen Hilfstext angezeigt, dass sie sich zur "
-            "Abholortänderung an den Betrieb wenden müssen. "
+            "Abholortänderung an die Verwaltung wenden müssen. "
             "Admins können weiterhin den Abholort für jedes Mitglied ändern.",
             category=ParameterCategory.MEMBER_DASHBOARD,
             order_priority=150,
+        )
+
+        importer.parameter_definition(
+            key=ParameterKeys.MEMBER_DASHBOARD_PICKUP_LOCATION_LABEL,
+            label="Bezeichnung für den Abholort im Mitgliederbereich",
+            datatype=TapirParameterDatatype.STRING,
+            initial_value="Abholort",
+            description="Wie der Abholort im Mitgliederbereich in der Kachel 'Abholung' genannt wird, z.B. 'Abholort', 'Verteilstation' oder 'Depot'. "
+            "Die Bezeichnung wird einheitlich als Spaltenüberschrift in der Tabelle der Abholungen und "
+            "im Button zum Ändern des Abholorts verwendet (z.B. 'Abholort ändern'). "
+            "Andere Seiten (z.B. Bestellwizard, E-Mails, Admin-Bereich) sind davon nicht betroffen.",
+            category=ParameterCategory.MEMBER_DASHBOARD,
+            order_priority=149,
+        )
+
+        importer.parameter_definition(
+            key=ParameterKeys.MEMBER_DELIVERY_ADDRESS_CHANGE_WARNING_TEXT,
+            label="Hinweis bei Änderung der Lieferadresse nach der Kommissionierfrist",
+            datatype=TapirParameterDatatype.STRING,
+            initial_value="Die Kommissionierlisten für diese Woche sind schon erstellt. Deine Änderung gilt "
+            "eventuell erst ab der nächsten Lieferung. Bitte melde dich bei der Verwaltung, wenn die Lieferung "
+            "dieser Woche an die neue Adresse gehen soll.",
+            description="Wird im Mitgliederbereich beim Ändern der Lieferadresse angezeigt, wenn die "
+            "Kommissioniervariable für die nächste Lieferung schon überschritten ist.",
+            category=ParameterCategory.MEMBER_DASHBOARD,
+            order_priority=148,
+            meta=ParameterMeta(textarea=True),
         )
 
         importer.parameter_definition(

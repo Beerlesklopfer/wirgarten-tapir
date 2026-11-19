@@ -7,9 +7,11 @@ import {
 } from "../../../api-client";
 import TapirButton from "../../../components/TapirButton.tsx";
 import TapirHelpButton from "../../../components/TapirHelpButton.tsx";
+import { fromApiDate } from "../../../utils/apiDate.ts";
 import { formatDateNumeric } from "../../../utils/formatDateNumeric.ts";
 import { formatDateText } from "../../../utils/formatDateText.ts";
 import { formatDateTextLong } from "../../../utils/formatDateTextLong.ts";
+import { negativeSolidarityCancellationIsRequired } from "../negativeSolidarityCancellationIsRequired.ts";
 
 interface CancellationStepSubscriptionsProps {
   errors: string[];
@@ -70,7 +72,8 @@ function buildNoticePeriodText(subscribedProduct: ProductForCancellation) {
       Beachte: Nach Ablauf der Probezeit kannst du erst wieder unter
       Berücksichtigung der regulären Kündigungsfrist (
       {subscribedProduct.noticePeriodDuration} {unit}) zum{" "}
-      {formatDateNumeric(subscribedProduct.subscriptionEndDate)} kündigen.
+      {formatDateNumeric(subscribedProduct.postTrialSubscriptionEndDate)}{" "}
+      kündigen.
     </p>
   );
 }
@@ -83,7 +86,7 @@ function buildHelpText(
     return (
       <p>
         Du kannst deinen Vertrag bis zum{" "}
-        {formatDateNumeric(subscribedProduct.lastDayOfNoticePeriod)} zum{" "}
+        {formatDateNumeric(subscribedProduct.lastDayToGiveNotice)} zum{" "}
         {formatDateNumeric(subscribedProduct.cancellationDate)} kündigen. Nach
         Ablauf der Kündigungsfrist verlängert sich dein Vertrag automatisch um
         ein weiteres Jahr.
@@ -102,10 +105,9 @@ function buildHelpText(
           Wenn du deine komplette Probezeit nutzen willst, dann kündige in der
           letzten Lieferwoche bis zum{" "}
           {subscribedProduct.dateLimitForTrialCancellation
-            ? subscribedProduct.dateLimitForTrialCancellation.toLocaleDateString(
-                "de-DE",
-                { weekday: "long" },
-              )
+            ? fromApiDate(
+                subscribedProduct.dateLimitForTrialCancellation,
+              ).toLocaleDateString("de-DE", { weekday: "long" })
             : "Kein Datum"}{" "}
           um 23:59 Uhr.
         </p>
@@ -118,10 +120,10 @@ function buildHelpText(
   return (
     <>
       <p>
-        Du kannst deinen Vertrag bis zum{" "}
+        Du kannst deinen Vertrag bis zum Ende deiner Probezeit am{" "}
         {formatDateTextLong(subscribedProduct.dateLimitForTrialCancellation)} um
-        23:59 Uhr kündigen, damit dein Vertrag am{" "}
-        {formatDateTextLong(subscribedProduct.cancellationDate)} beendet wird.
+        23:59 Uhr kündigen. Dein Vertrag endet dann am{" "}
+        {formatDateTextLong(subscribedProduct.cancellationDate)}.
       </p>
 
       {buildNoticePeriodText(subscribedProduct)}
@@ -158,6 +160,15 @@ const CancellationStepSubscriptions: React.FC<
     }
   }
 
+  const negativeSolidarityMustBeCancelled =
+    negativeSolidarityCancellationIsRequired(
+      subscribedProducts,
+      selectedProducts,
+      canCancelAssociationMembership,
+      cancelAssociationMembershipSelected,
+      solidarityContributionData,
+    );
+
   useEffect(() => {
     if (selectedProducts.length !== subscribedProducts.length) {
       setCancelAssociationMembershipSelected(false);
@@ -180,7 +191,7 @@ const CancellationStepSubscriptions: React.FC<
           <div>Welche Verträge möchtest du kündigen?</div>
 
           <Form.Text>
-            Wenn du früher kündigen möchtest, wende dich bitte an unsere
+            Wenn du früher kündigen möchtest, wende dich bitte an die
             Verwaltung.
           </Form.Text>
 
@@ -219,11 +230,21 @@ const CancellationStepSubscriptions: React.FC<
                   setCancelSolidarityContribution(event.target.checked)
                 }
                 required={false}
-                checked={cancelSolidarityContribution}
+                checked={
+                  cancelSolidarityContribution ||
+                  negativeSolidarityMustBeCancelled
+                }
+                disabled={negativeSolidarityMustBeCancelled}
                 label={getCheckboxLabelSolidarityContribution(
                   solidarityContributionData,
                 )}
               />
+              {negativeSolidarityMustBeCancelled && (
+                <Form.Text>
+                  Der negative Solidarbeitrag wird automatisch mitgekündigt,
+                  weil alle Verträge gekündigt werden.
+                </Form.Text>
+              )}
             </Form.Group>
           )}
           {canCancelCoopMembership && (

@@ -23,7 +23,6 @@ from tapir.accounts.models import TapirUser
 from tapir.associations.models import AssociationMembership
 from tapir.configuration.parameter import get_parameter_value
 from tapir.coop.models import CoopSharesCancelledLogEntry
-from tapir.coop.services.membership_text_service import MembershipTextService
 from tapir.coop.services.token_builder_coop_entry import TokenBuilderCoopEntry
 from tapir.deliveries.services.get_deliveries_service import GetDeliveriesService
 from tapir.solidarity_contribution.models import SolidarityContribution
@@ -169,10 +168,6 @@ def cancel_coop_shares(
     )
 
 
-def resolve_member_id(member: str | Member | TapirUser) -> str:
-    return member.id if type(member) is not str and member.id else member
-
-
 def create_wait_list_entry(
     member: Member | None,
     first_name: str,
@@ -198,54 +193,6 @@ def create_wait_list_entry(
         country="DE",
         comment="",
         number_of_coop_shares=0,
-    )
-
-
-def send_cancellation_confirmation_email(
-    member: str | Member,
-    contract_end_date: datetime.date,
-    subs_to_cancel: List[Subscription],
-    revoke_coop_membership: bool = False,
-    cache: dict = None,
-):
-    member_id = resolve_member_id(member)
-    member = Member.objects.get(pk=member_id)
-
-    contract_list = f"{'<br/>'.join(map(lambda x: '- ' + str(x), subs_to_cancel))}"
-    if revoke_coop_membership:
-        contract_list += "\n- " + MembershipTextService.get_membership_text(cache=cache)
-
-    future_subs = get_active_and_future_subscriptions(
-        contract_end_date + relativedelta(days=1), cache=cache
-    ).filter(member_id=member_id)
-    if (
-        not future_subs.exists()
-    ):  # only schedule contract end reminder if the member has no other contracts left
-        schedule_task_unique(
-            task=send_email_member_contract_end_reminder,
-            eta=contract_end_date,
-            kwargs={"member_id": member_id},
-        )
-
-    end_date = GrowingPeriod.objects.order_by("end_date").last().end_date
-    future_deliveries = GetDeliveriesService.get_deliveries(
-        member=member, date_from=get_today(cache=cache), date_to=end_date, cache=cache
-    )
-
-    last_pickup_date = "Letzte Abholung schon vergangen"
-    if len(future_deliveries) > 0:
-        last_pickup_date = format_date(future_deliveries[-1]["delivery_date"])
-
-    TransactionalTrigger.fire_action(
-        TransactionalTriggerData(
-            key=Events.TRIAL_CANCELLATION,
-            recipient_id_in_base_queryset=member.id,
-            token_data={
-                "contract_list": contract_list,
-                "contract_end_date": format_date(contract_end_date),
-                "last_pickup_date": last_pickup_date,
-            },
-        ),
     )
 
 
@@ -309,8 +256,10 @@ def send_investing_membership_confirmation(
             token_data=TokenBuilderCoopEntry.build_mail_tokens_for_coop_entry(
                 coop_share_transaction=coop_share_transaction,
                 association_membership=association_membership,
-                solidarity_contribution=solidarity_contribution,
                 cache=cache,
+            )
+            | TokenBuilderCoopEntry.build_mail_tokens_for_solidarity_contribution(
+                solidarity_contribution
             )
             | OrderConfirmationMailTokenBuilder.build_membership_only_tokens(
                 member=member,
@@ -329,36 +278,55 @@ def send_product_order_confirmation(
     coop_share_transaction: CoopShareTransaction | None,
     association_membership: AssociationMembership | None,
     solidarity_contribution: SolidarityContribution | None,
+    without_coop_shares: bool = False,
 ):
     min_contract_start_date = min([subscription.start_date for subscription in subs])
     min_contract_end_date = min([subscription.end_date for subscription in subs])
+    event = _get_product_order_confirmation_event(
+        from_waiting_list=from_waiting_list,
+        without_coop_shares=without_coop_shares,
+    )
+
+    token_data = (
+        {
+            "contract_start_date": format_date(min_contract_start_date),
+            "contract_end_date": format_date(min_contract_end_date),
+        }
+        | OrderConfirmationMailTokenBuilder.build_product_order_tokens(
+            member=member,
+            subscriptions=subs,
+            solidarity_contribution=solidarity_contribution,
+            cache=cache,
+        )
+        | TokenBuilderCoopEntry.build_mail_tokens_for_solidarity_contribution(
+            solidarity_contribution
+        )
+    )
+
+    if event != Events.REGISTER_SUBSCRIPTION_WITHOUT_COOP_SHARES:
+        token_data |= TokenBuilderCoopEntry.build_mail_tokens_for_coop_entry(
+            coop_share_transaction=coop_share_transaction,
+            association_membership=association_membership,
+            cache=cache,
+        )
 
     TransactionalTrigger.fire_action(
         trigger_data=TransactionalTriggerData(
-            key=(
-                Events.WAITING_LIST_ORDER_CONFIRMATION
-                if from_waiting_list
-                else Events.REGISTER_MEMBERSHIP_AND_SUBSCRIPTION
-            ),
+            key=event,
             recipient_id_in_base_queryset=member.id,
-            token_data={
-                "contract_start_date": format_date(min_contract_start_date),
-                "contract_end_date": format_date(min_contract_end_date),
-            }
-            | OrderConfirmationMailTokenBuilder.build_product_order_tokens(
-                member=member,
-                subscriptions=subs,
-                solidarity_contribution=solidarity_contribution,
-                cache=cache,
-            )
-            | TokenBuilderCoopEntry.build_mail_tokens_for_coop_entry(
-                coop_share_transaction=coop_share_transaction,
-                association_membership=association_membership,
-                solidarity_contribution=solidarity_contribution,
-                cache=cache,
-            ),
+            token_data=token_data,
         ),
     )
+
+
+def _get_product_order_confirmation_event(
+    from_waiting_list: bool, without_coop_shares: bool
+) -> str:
+    if from_waiting_list:
+        return Events.WAITING_LIST_ORDER_CONFIRMATION
+    if without_coop_shares:
+        return Events.REGISTER_SUBSCRIPTION_WITHOUT_COOP_SHARES
+    return Events.REGISTER_MEMBERSHIP_AND_SUBSCRIPTION
 
 
 def annotate_member_queryset_with_coop_shares_total_value(

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Modal, Table } from "react-bootstrap";
+import { Badge, Modal, Table } from "react-bootstrap";
 import {
   Member,
   Payment,
@@ -110,7 +110,9 @@ const PaymentTransactionsDetailsModal: React.FC<
   function buildLine(mandateRef: string) {
     const member = membersByMandateRef[mandateRef];
     const payments = paymentsByMandateRef[mandateRef];
-    const sum = payments.reduce((sum, payment) => payment.amount + sum, 0);
+    const sum = payments
+      .filter((payment) => !payment.excludedFromExport)
+      .reduce((sum, payment) => payment.amount + sum, 0);
 
     return (
       <tr key={mandateRef}>
@@ -119,7 +121,7 @@ const PaymentTransactionsDetailsModal: React.FC<
           {member.firstName}
         </td>
         <td>{mandateRef}</td>
-        <td>{intendedUseByMandateRef[mandateRef]}</td>
+        <td>{intendedUseByMandateRef[mandateRef] ?? "–"}</td>
         <td>{formatCurrency(sum)}</td>
         <td>
           <ul>
@@ -128,6 +130,12 @@ const PaymentTransactionsDetailsModal: React.FC<
                 {formatPaymentType(payment.type)}{" "}
                 {formatCurrency(payment.amount)}
                 {getPaymentRangeDetails(payment)}
+                {payment.excludedFromExport && (
+                  <>
+                    {" "}
+                    <Badge bg={"secondary"}>nicht eingezogen</Badge>
+                  </>
+                )}
               </li>
             ))}
           </ul>
@@ -137,12 +145,14 @@ const PaymentTransactionsDetailsModal: React.FC<
   }
 
   return (
-    <Modal show={true} onHide={onHide} centered={true} size={"xl"}>
+    <Modal show={true} onHide={onHide} centered={true} size={"xl"} scrollable>
       <Modal.Header closeButton>
         <Modal.Title>
           Lastschrift Details: {transaction.type}{" "}
           {formatDateMonthAndYear(transaction.month)}{" "}
           {formatCurrency(transaction.paymentsSum)}
+          {transaction.excludedPaymentsCount > 0 &&
+            ` (+ ${formatCurrency(transaction.excludedPaymentsSum)} nicht eingezogen)`}
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
@@ -158,7 +168,7 @@ const PaymentTransactionsDetailsModal: React.FC<
           </thead>
           <tbody>
             {loading ? (
-              <PlaceholderTableRows nbRows={100} nbColumns={4} size={"lg"} />
+              <PlaceholderTableRows nbRows={100} nbColumns={5} size={"lg"} />
             ) : (
               getSortedMandateRefs().map(buildLine)
             )}

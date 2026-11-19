@@ -32,12 +32,10 @@ class TestValidateOrderAndUserData(TapirUnitTest):
         }
         cache = Mock()
 
-        with self.assertRaises(ValidationError) as error:
+        with self.assertRaisesMessage(ValidationError, "SEPA-Mandat muss erlaubt sein"):
             BestellWizardOrderValidator.validate_order_and_user_data_and_distribution_channels(
                 validated_serializer_data=data, contract_start_date=Mock(), cache=cache
             )
-
-        self.assertEqual("SEPA-Mandat muss erlaubt sein", error.exception.message)
 
         mock_validate_personal_data_new_member.assert_called_once_with(
             email="test_mail",
@@ -81,14 +79,12 @@ class TestValidateOrderAndUserData(TapirUnitTest):
         order = Mock()
         mock_build_tapir_order_from_shopping_cart_serializer.return_value = order
 
-        with self.assertRaises(ValidationError) as error:
+        with self.assertRaisesMessage(
+            ValidationError, "Vertragsgrundsätze müssen akzeptiert sein"
+        ):
             BestellWizardOrderValidator.validate_order_and_user_data_and_distribution_channels(
                 validated_serializer_data=data, contract_start_date=Mock(), cache=cache
             )
-
-        self.assertEqual(
-            "Vertragsgrundsätze müssen akzeptiert sein", error.exception.message
-        )
 
         mock_validate_personal_data_new_member.assert_called_once_with(
             email="test_mail",
@@ -216,16 +212,14 @@ class TestValidateOrderAndUserData(TapirUnitTest):
         mock_is_cancellation_policy_required.return_value = True
         mock_build_tapir_order_from_shopping_cart_serializer.return_value = order
 
-        with self.assertRaises(ValidationError) as error:
+        with self.assertRaisesMessage(
+            ValidationError, "Die Widerrufsbelehrung muss akzeptiert sein"
+        ):
             BestellWizardOrderValidator.validate_order_and_user_data_and_distribution_channels(
                 validated_serializer_data=data,
                 contract_start_date=contract_start_date,
                 cache=cache,
             )
-
-        self.assertEqual(
-            "Die Widerrufsbelehrung muss akzeptiert sein", error.exception.message
-        )
 
         mock_validate_personal_data_new_member.assert_called_once_with(
             email="test_mail",
@@ -282,7 +276,7 @@ class TestValidateOrderAndUserData(TapirUnitTest):
         pickup_location_ids = Mock()
         contract_start_date = Mock()
         shopping_cart = Mock()
-        order = Mock()
+        order = {}
         distribution_channels = Mock()
         data = {
             "personal_data": {
@@ -387,16 +381,12 @@ class TestValidateOrderAndUserData(TapirUnitTest):
         mock_build_tapir_order_from_shopping_cart_serializer.return_value = order
         mock_is_the_ordered_solidarity_allowed.return_value = False
 
-        with self.assertRaises(ValidationError) as error:
+        with self.assertRaisesMessage(ValidationError, "Solidarbeitrag zu niedrig"):
             BestellWizardOrderValidator.validate_order_and_user_data_and_distribution_channels(
                 validated_serializer_data=data,
                 contract_start_date=contract_start_date,
                 cache=cache,
             )
-
-        self.assertEqual(
-            "Solidarbeitrag ungültig oder zu niedrig", error.exception.message
-        )
 
         mock_validate_personal_data_new_member.assert_called_once_with(
             email="test_mail",
@@ -421,7 +411,7 @@ class TestValidateOrderAndUserData(TapirUnitTest):
             cache=cache,
         )
         mock_is_the_ordered_solidarity_allowed.assert_called_once_with(
-            amount=12, start_date=contract_start_date, cache=cache
+            amount=12, start_date=contract_start_date, order=order, cache=cache
         )
 
     @patch.object(
@@ -515,7 +505,7 @@ class TestValidateOrderAndUserData(TapirUnitTest):
             cache=cache,
         )
         mock_is_the_ordered_solidarity_allowed.assert_called_once_with(
-            amount=12, start_date=contract_start_date, cache=cache
+            amount=12, start_date=contract_start_date, order=order, cache=cache
         )
         mock_legal_status_is_cooperative.assert_called_once_with(cache=cache)
         mock_validate_coop_content.assert_called_once_with(
@@ -626,7 +616,7 @@ class TestValidateOrderAndUserData(TapirUnitTest):
             cache=cache,
         )
         mock_is_the_ordered_solidarity_allowed.assert_called_once_with(
-            amount=12, start_date=contract_start_date, cache=cache
+            amount=12, start_date=contract_start_date, order=order, cache=cache
         )
         mock_legal_status_is_cooperative.assert_called_once_with(cache=cache)
         mock_validate_coop_content.assert_not_called()
@@ -737,7 +727,7 @@ class TestValidateOrderAndUserData(TapirUnitTest):
             cache=cache,
         )
         mock_is_the_ordered_solidarity_allowed.assert_called_once_with(
-            amount=12, start_date=contract_start_date, cache=cache
+            amount=12, start_date=contract_start_date, order=order, cache=cache
         )
         mock_legal_status_is_cooperative.assert_called_once_with(cache=cache)
         mock_validate_coop_content.assert_not_called()

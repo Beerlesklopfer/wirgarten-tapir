@@ -2,7 +2,7 @@ import datetime
 import json
 from decimal import Decimal
 from typing import Any
-from unittest.mock import patch, Mock, ANY
+from unittest.mock import patch, Mock
 
 from django.urls import reverse
 from keycloak import KeycloakPutError
@@ -149,9 +149,7 @@ class TestBestellWizardConfirmOrderApiViewPost(TapirIntegrationTest):
             key=Events.REGISTER_MEMBERSHIP_AND_SUBSCRIPTION,
         )
         self.assertEqual(2, mock_on_subscription_updated.call_count)
-        mock_send_verification_email.assert_called_once_with(
-            user=member, actor=member, cache=ANY
-        )
+        mock_send_verification_email.assert_called_once_with(user=member, actor=member)
 
     def test_post_requestDataIsInvalid_returns400(self):
         data = self.build_valid_post_data_for_an_order_without_waiting_list()
@@ -473,6 +471,57 @@ class TestBestellWizardConfirmOrderApiViewPost(TapirIntegrationTest):
         self.assertFalse(WaitingListEntry.objects.exists())
 
     @patch.object(TransactionalTrigger, "fire_action", autospec=True)
+    def test_post_investingMemberPaysInInstalments_createsOnePaymentPerInstalment(
+        self, _: Mock
+    ):
+        self._set_parameter(
+            key=ParameterKeys.COOP_SHARES_INSTALMENTS_ENABLED, value=True
+        )
+        self._set_parameter(key=ParameterKeys.COOP_SHARES_INSTALMENT_AMOUNT, value=20)
+        data = self.build_valid_post_data_for_an_order_without_waiting_list()
+        data["shopping_cart_order"] = {}
+        data["become_member_now"] = True
+        data["pickup_location_ids"] = []
+        data["pay_coop_shares_in_instalments"] = True
+
+        response = self.client.post(
+            reverse("bestell_wizard:bestell_wizard_confirm_order"),
+            data=json.dumps(data),
+            content_type="application/json",
+        )
+
+        self.assertStatusCode(response, 200)
+        self.assert_order_confirmed(response.json())
+        coop_share_transaction = CoopShareTransaction.objects.get()
+        payments = list(coop_share_transaction.payments.order_by("instalment_number"))
+        self.assertEqual([1, 2, 3, 4, 5], [p.instalment_number for p in payments])
+        for payment in payments:
+            self.assertEqual(Decimal(20), payment.amount)
+
+    @patch.object(TransactionalTrigger, "fire_action", autospec=True)
+    def test_post_payInInstalmentsWithMoreThanTheMinimumOfShares_orderNotConfirmed(
+        self, _: Mock
+    ):
+        self._set_parameter(
+            key=ParameterKeys.COOP_SHARES_INSTALMENTS_ENABLED, value=True
+        )
+        data = self.build_valid_post_data_for_an_order_without_waiting_list()
+        data["number_of_coop_shares"] = 3
+        data["pay_coop_shares_in_instalments"] = True
+
+        response = self.client.post(
+            reverse("bestell_wizard:bestell_wizard_confirm_order"),
+            data=json.dumps(data),
+            content_type="application/json",
+        )
+
+        self.assertStatusCode(response, 200)
+        response_content = response.json()
+        self.assertFalse(response_content["order_confirmed"])
+        self.assertIn("Ratenzahlung", response_content["error"])
+        self.assertFalse(Member.objects.exists())
+
+    @patch.object(TransactionalTrigger, "fire_action", autospec=True)
     def test_post_investingMemberWithoutCurrentGrowingPeriod_solidarityContributionStartsAtMembershipStart(
         self, mock_fire_action: Mock
     ):
@@ -785,7 +834,7 @@ class TestBestellWizardConfirmOrderApiViewPost(TapirIntegrationTest):
         response_content = response.json()
         self.assertFalse(response_content["order_confirmed"])
         self.assertIn(
-            "Solidarbeitrag ungültig oder zu niedrig",
+            "Solidarbeitrag zu niedrig",
             response_content["error"],
         )
         self.assertFalse(Member.objects.exists())
@@ -875,6 +924,173 @@ class TestBestellWizardConfirmOrderApiViewPost(TapirIntegrationTest):
 
         self.assert_order_confirmed(response_content)
         self.assertFalse(WaitingListEntry.objects.get().phone_number)
+
+    def post_with_pseudonym(self, data: dict):
+        data["personal_data"]["pseudonym"] = "Brotfan"
+        response = self.client.post(
+            reverse("bestell_wizard:bestell_wizard_confirm_order"),
+            data=json.dumps(data),
+            content_type="application/json",
+        )
+        self.assertStatusCode(response, 200)
+        return response.json()
+
+    def test_post_orderWithPseudonym_memberCreatedWithPseudonym(self):
+        response_content = self.post_with_pseudonym(
+            self.build_valid_post_data_for_an_order_without_waiting_list()
+        )
+
+        self.assert_order_confirmed(response_content)
+        self.assertEqual("Brotfan", Member.objects.get().pseudonym)
+
+    def test_post_waitingListEntryWithPseudonym_entryCreatedWithPseudonym(self):
+        response_content = self.post_with_pseudonym(
+            self.build_valid_post_data_for_a_waiting_list_entry()
+        )
+
+        self.assert_order_confirmed(response_content)
+        self.assertEqual("Brotfan", WaitingListEntry.objects.get().pseudonym)
+
+    def test_post_orderWithoutPseudonym_memberCreatedWithoutPseudonym(self):
+        response = self.client.post(
+            reverse("bestell_wizard:bestell_wizard_confirm_order"),
+            data=json.dumps(
+                self.build_valid_post_data_for_an_order_without_waiting_list()
+            ),
+            content_type="application/json",
+        )
+
+        self.assertStatusCode(response, 200)
+        self.assert_order_confirmed(response.json())
+        self.assertEqual("", Member.objects.get().pseudonym)
+
+    def test_post_pseudonymTooLong_returnsErrorAndDontCreateMember(self):
+        data = self.build_valid_post_data_for_an_order_without_waiting_list()
+        data["personal_data"]["pseudonym"] = "x" * 151
+
+        response = self.client.post(
+            reverse("bestell_wizard:bestell_wizard_confirm_order"),
+            data=json.dumps(data),
+            content_type="application/json",
+        )
+
+        self.assertStatusCode(response, 400)
+        self.assertFalse(Member.objects.exists())
+
+    @patch.object(EmailVerificationService, "send_verification_email", autospec=True)
+    @patch.object(OnboardingTrigger, "on_subscription_updated", autospec=True)
+    @patch.object(TransactionalTrigger, "fire_action", autospec=True)
+    def test_post_orderWithHomeDeliveryAndSeparateAddress_memberCreatedWithDeliveryAddress(
+        self, *_
+    ):
+        PickupLocation.objects.filter(id=self.pickup_location_1.id).update(
+            is_home_delivery=True
+        )
+        data = self.build_valid_post_data_for_an_order_without_waiting_list()
+        data["delivery_address"] = self._build_separate_delivery_address()
+
+        response = self.client.post(
+            reverse("bestell_wizard:bestell_wizard_confirm_order"),
+            data=json.dumps(data),
+            content_type="application/json",
+        )
+
+        self.assertStatusCode(response, 200)
+        self.assert_order_confirmed(response.json())
+        member = Member.objects.get()
+        self.assertFalse(member.delivery_same_as_billing_address)
+        self.assertEqual("Lieferweg 2", member.delivery_street)
+        self.assertEqual("22222", member.delivery_postcode)
+        self.assertEqual("Lieferdorf", member.delivery_city)
+        self.assertEqual(
+            self.pickup_location_1.id,
+            MemberPickupLocation.objects.get(member=member).pickup_location_id,
+        )
+
+    def test_post_orderWithHomeDeliveryAndIncompleteAddress_returnOrderNotConfirmedAndDontCreateMember(
+        self,
+    ):
+        PickupLocation.objects.filter(id=self.pickup_location_1.id).update(
+            is_home_delivery=True
+        )
+        data = self.build_valid_post_data_for_an_order_without_waiting_list()
+        data["delivery_address"] = self._build_separate_delivery_address(street="")
+
+        response = self.client.post(
+            reverse("bestell_wizard:bestell_wizard_confirm_order"),
+            data=json.dumps(data),
+            content_type="application/json",
+        )
+
+        self.assertStatusCode(response, 200)
+        response_content = response.json()
+        self.assertFalse(response_content["order_confirmed"])
+        self.assertEqual(
+            "Für die Hauslieferung wird eine vollständige Lieferadresse (Straße, PLZ und Ort) benötigt.",
+            response_content["error"],
+        )
+        self.assertFalse(Member.objects.exists())
+
+    @patch.object(TransactionalTrigger, "fire_action", autospec=True)
+    def test_post_waitingListEntryWithHomeDeliveryAndSeparateAddress_entryCreatedWithDeliveryAddress(
+        self, _
+    ):
+        PickupLocation.objects.filter(id=self.pickup_location_2.id).update(
+            is_home_delivery=True
+        )
+        data = self.build_valid_post_data_for_a_waiting_list_entry()
+        data["delivery_address"] = self._build_separate_delivery_address()
+
+        response = self.client.post(
+            reverse("bestell_wizard:bestell_wizard_confirm_order"),
+            data=json.dumps(data),
+            content_type="application/json",
+        )
+
+        self.assertStatusCode(response, 200)
+        self.assert_order_confirmed(response.json())
+        waiting_list_entry = WaitingListEntry.objects.get()
+        self.assertFalse(waiting_list_entry.delivery_same_as_billing_address)
+        self.assertEqual("Lieferweg 2", waiting_list_entry.delivery_street)
+        self.assertEqual("22222", waiting_list_entry.delivery_postcode)
+        self.assertEqual("Lieferdorf", waiting_list_entry.delivery_city)
+
+    def test_post_waitingListEntryWithHomeDeliveryAndIncompleteAddress_returnsOrderNotConfirmedAndDontCreateEntry(
+        self,
+    ):
+        PickupLocation.objects.filter(id=self.pickup_location_2.id).update(
+            is_home_delivery=True
+        )
+        data = self.build_valid_post_data_for_a_waiting_list_entry()
+        data["delivery_address"] = self._build_separate_delivery_address(city="")
+
+        response = self.client.post(
+            reverse("bestell_wizard:bestell_wizard_confirm_order"),
+            data=json.dumps(data),
+            content_type="application/json",
+        )
+
+        self.assertStatusCode(response, 200)
+        response_content = response.json()
+        self.assertFalse(response_content["order_confirmed"])
+        self.assertEqual(
+            "Für die Hauslieferung wird eine vollständige Lieferadresse (Straße, PLZ und Ort) benötigt.",
+            response_content["error"],
+        )
+        self.assertFalse(WaitingListEntry.objects.exists())
+
+    @staticmethod
+    def _build_separate_delivery_address(**overrides: str) -> dict[str, Any]:
+        delivery_address = {
+            "same_as_billing_address": False,
+            "street": "Lieferweg 2",
+            "street_2": "",
+            "postcode": "22222",
+            "city": "Lieferdorf",
+            "country": "DE",
+        }
+        delivery_address.update(overrides)
+        return delivery_address
 
     @classmethod
     def build_valid_post_data_for_a_waiting_list_entry(cls) -> dict[str, Any]:
@@ -1016,7 +1232,12 @@ class TestBestellWizardConfirmOrderApiViewPost(TapirIntegrationTest):
         )
 
         self.assert_mail_event_has_been_triggered(
-            mock_fire_action, key=Events.REGISTER_MEMBERSHIP_AND_SUBSCRIPTION
+            mock_fire_action,
+            key=(
+                Events.REGISTER_SUBSCRIPTION_WITHOUT_COOP_SHARES
+                if is_student
+                else Events.REGISTER_MEMBERSHIP_AND_SUBSCRIPTION
+            ),
         )
 
         self.assertEqual(1, QuestionaireTrafficSourceResponse.objects.count())

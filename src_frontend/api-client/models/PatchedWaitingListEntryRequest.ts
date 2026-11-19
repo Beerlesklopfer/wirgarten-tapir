@@ -12,8 +12,13 @@
  * Do not edit the class manually.
  */
 
-import type { MemberCountry } from "./MemberCountry";
-import { MemberCountryFromJSON, MemberCountryToJSON } from "./MemberCountry";
+import type { Land } from "./Land";
+import { LandFromJSON, LandToJSON } from "./Land";
+import type { MemberDeliveryCountry } from "./MemberDeliveryCountry";
+import {
+  MemberDeliveryCountryFromJSON,
+  MemberDeliveryCountryToJSON,
+} from "./MemberDeliveryCountry";
 
 /**
  *
@@ -77,10 +82,16 @@ export interface PatchedWaitingListEntryRequest {
   city?: string;
   /**
    *
-   * @type {MemberCountry}
+   * @type {Land}
    * @memberof PatchedWaitingListEntryRequest
    */
-  country?: MemberCountry;
+  country?: Land;
+  /**
+   *
+   * @type {string}
+   * @memberof PatchedWaitingListEntryRequest
+   */
+  pseudonym?: string;
   /**
    *
    * @type {Date}
@@ -95,10 +106,10 @@ export interface PatchedWaitingListEntryRequest {
   numberOfCoopShares?: number;
   /**
    *
-   * @type {Date}
+   * @type {string}
    * @memberof PatchedWaitingListEntryRequest
    */
-  desiredStartDate?: Date | null;
+  desiredStartDate?: string | null;
   /**
    *
    * @type {string}
@@ -123,6 +134,42 @@ export interface PatchedWaitingListEntryRequest {
    * @memberof PatchedWaitingListEntryRequest
    */
   linkSentDate?: Date | null;
+  /**
+   *
+   * @type {boolean}
+   * @memberof PatchedWaitingListEntryRequest
+   */
+  deliverySameAsBillingAddress?: boolean;
+  /**
+   *
+   * @type {string}
+   * @memberof PatchedWaitingListEntryRequest
+   */
+  deliveryStreet?: string;
+  /**
+   *
+   * @type {string}
+   * @memberof PatchedWaitingListEntryRequest
+   */
+  deliveryStreet2?: string;
+  /**
+   *
+   * @type {string}
+   * @memberof PatchedWaitingListEntryRequest
+   */
+  deliveryPostcode?: string;
+  /**
+   *
+   * @type {string}
+   * @memberof PatchedWaitingListEntryRequest
+   */
+  deliveryCity?: string;
+  /**
+   *
+   * @type {MemberDeliveryCountry}
+   * @memberof PatchedWaitingListEntryRequest
+   */
+  deliveryCountry?: MemberDeliveryCountry;
   /**
    *
    * @type {string}
@@ -165,9 +212,8 @@ export function PatchedWaitingListEntryRequestFromJSONTyped(
     postcode: json["postcode"] == null ? undefined : json["postcode"],
     city: json["city"] == null ? undefined : json["city"],
     country:
-      json["country"] == null
-        ? undefined
-        : MemberCountryFromJSON(json["country"]),
+      json["country"] == null ? undefined : LandFromJSON(json["country"]),
+    pseudonym: json["pseudonym"] == null ? undefined : json["pseudonym"],
     privacyConsent:
       json["privacy_consent"] == null
         ? undefined
@@ -179,7 +225,7 @@ export function PatchedWaitingListEntryRequestFromJSONTyped(
     desiredStartDate:
       json["desired_start_date"] == null
         ? undefined
-        : new Date(json["desired_start_date"]),
+        : json["desired_start_date"],
     comment: json["comment"] == null ? undefined : json["comment"],
     category: json["category"] == null ? undefined : json["category"],
     confirmationLinkKey:
@@ -190,6 +236,22 @@ export function PatchedWaitingListEntryRequestFromJSONTyped(
       json["link_sent_date"] == null
         ? undefined
         : new Date(json["link_sent_date"]),
+    deliverySameAsBillingAddress:
+      json["delivery_same_as_billing_address"] == null
+        ? undefined
+        : json["delivery_same_as_billing_address"],
+    deliveryStreet:
+      json["delivery_street"] == null ? undefined : json["delivery_street"],
+    deliveryStreet2:
+      json["delivery_street_2"] == null ? undefined : json["delivery_street_2"],
+    deliveryPostcode:
+      json["delivery_postcode"] == null ? undefined : json["delivery_postcode"],
+    deliveryCity:
+      json["delivery_city"] == null ? undefined : json["delivery_city"],
+    deliveryCountry:
+      json["delivery_country"] == null
+        ? undefined
+        : MemberDeliveryCountryFromJSON(json["delivery_country"]),
     member: json["member"] == null ? undefined : json["member"],
   };
 }
@@ -218,16 +280,14 @@ export function PatchedWaitingListEntryRequestToJSONTyped(
     street_2: value["street2"],
     postcode: value["postcode"],
     city: value["city"],
-    country: MemberCountryToJSON(value["country"]),
+    country: LandToJSON(value["country"]),
+    pseudonym: value["pseudonym"],
     privacy_consent:
       value["privacyConsent"] == null
         ? undefined
         : value["privacyConsent"].toISOString(),
     number_of_coop_shares: value["numberOfCoopShares"],
-    desired_start_date:
-      value["desiredStartDate"] == null
-        ? undefined
-        : (value["desiredStartDate"] as any).toISOString().substring(0, 10),
+    desired_start_date: value["desiredStartDate"],
     comment: value["comment"],
     category: value["category"],
     confirmation_link_key: value["confirmationLinkKey"],
@@ -235,6 +295,12 @@ export function PatchedWaitingListEntryRequestToJSONTyped(
       value["linkSentDate"] == null
         ? undefined
         : (value["linkSentDate"] as any).toISOString(),
+    delivery_same_as_billing_address: value["deliverySameAsBillingAddress"],
+    delivery_street: value["deliveryStreet"],
+    delivery_street_2: value["deliveryStreet2"],
+    delivery_postcode: value["deliveryPostcode"],
+    delivery_city: value["deliveryCity"],
+    delivery_country: MemberDeliveryCountryToJSON(value["deliveryCountry"]),
     member: value["member"],
   };
 }

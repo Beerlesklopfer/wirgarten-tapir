@@ -5,12 +5,24 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404
 
 from tapir.associations.models import AssociationMembershipType
+from tapir.coop.services.coop_share_instalment_order_validator import (
+    CoopShareInstalmentOrderValidator,
+)
 from tapir.coop.services.minimum_number_of_shares_validator import (
     MinimumNumberOfSharesValidator,
 )
 from tapir.coop.services.personal_data_validator import PersonalDataValidator
+from tapir.pickup_locations.services.home_delivery_address_validator import (
+    HomeDeliveryAddressValidator,
+)
+from tapir.solidarity_contribution.services.solidarity_validator import (
+    SolidarityValidator,
+)
 from tapir.subscriptions.services.tapir_order_builder import TapirOrderBuilder
 from tapir.subscriptions.types import TapirOrder
+from tapir.waiting_list.services.waiting_list_entry_confirmation_applier import (
+    WaitingListEntryConfirmationApplier,
+)
 from tapir.wirgarten.models import WaitingListEntry
 from tapir.wirgarten.utils import (
     legal_status_is_cooperative,
@@ -41,7 +53,22 @@ class WaitingListEntryConfirmationValidator:
             if not validated_data["contract_accepted"]:
                 raise ValidationError("Vertragsgrundsätze müssen akzeptiert sein")
 
+        cls.validate_home_delivery_address(waiting_list_entry=waiting_list_entry)
+
         return waiting_list_entry
+
+    @classmethod
+    def validate_home_delivery_address(cls, waiting_list_entry: WaitingListEntry):
+        pickup_location_wish = waiting_list_entry.pickup_location_wishes.order_by(
+            "priority"
+        ).first()
+        if pickup_location_wish is None:
+            return
+
+        HomeDeliveryAddressValidator.validate(
+            address_owner=waiting_list_entry,
+            pickup_location=pickup_location_wish.pickup_location,
+        )
 
     @classmethod
     def validate_new_member_data(
@@ -64,6 +91,7 @@ class WaitingListEntryConfirmationValidator:
             cls.validate_number_of_shares(
                 order=order,
                 desired_number_of_coop_shares=validated_data["number_of_coop_shares"],
+                pay_in_instalments=validated_data["pay_coop_shares_in_instalments"],
                 cache=cache,
             )
 
@@ -73,6 +101,19 @@ class WaitingListEntryConfirmationValidator:
                     "association_membership_type_id", None
                 )
             )
+
+        contract_start_date = (
+            WaitingListEntryConfirmationApplier.get_contract_start_date(
+                waiting_list_entry=waiting_list_entry, cache=cache
+            )
+        )
+        if not SolidarityValidator.is_the_ordered_solidarity_allowed(
+            amount=validated_data["solidarity_contribution"],
+            start_date=contract_start_date,
+            order=order,
+            cache=cache,
+        ):
+            raise ValidationError("Solidarbeitrag zu niedrig")
 
     @classmethod
     def validate_association_content(cls, association_membership_type_id: str | None):
@@ -89,7 +130,11 @@ class WaitingListEntryConfirmationValidator:
 
     @classmethod
     def validate_number_of_shares(
-        cls, order: TapirOrder, desired_number_of_coop_shares: int, cache: dict
+        cls,
+        order: TapirOrder,
+        desired_number_of_coop_shares: int,
+        pay_in_instalments: bool,
+        cache: dict,
     ):
         min_number_of_shares = (
             MinimumNumberOfSharesValidator.get_minimum_number_of_shares_for_tapir_order(
@@ -99,6 +144,12 @@ class WaitingListEntryConfirmationValidator:
         if desired_number_of_coop_shares < min_number_of_shares:
             raise ValidationError(
                 f"Diese Bestellung erfordert mindestens {min_number_of_shares} Genossenschaftsanteile"
+            )
+        if pay_in_instalments:
+            CoopShareInstalmentOrderValidator.validate_instalments(
+                number_of_coop_shares=desired_number_of_coop_shares,
+                minimum_number_of_coop_shares=min_number_of_shares,
+                cache=cache,
             )
 
     @classmethod

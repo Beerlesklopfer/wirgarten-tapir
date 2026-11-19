@@ -2,7 +2,7 @@
 {% load i18n %}
 {% load core %}
 {% load wirgarten %}
-{% load tapir_static %}
+{% load static %}
 {% load django_bootstrap5 %}
 {% block content %}
     <div style="margin-top: 1em;">
@@ -21,7 +21,7 @@
                  style="height: calc(100vh - {% if is_paginated %}14em{% else %}9.5em{% endif %});
                         overflow-y: scroll;
                         padding: 0px">
-                <table class="table"
+                <table class="table text-nowrap"
                        aria-label="Liste"
                        style="margin:1em;
                               width: calc(100% - 2em)">
@@ -119,7 +119,7 @@
         const sortOrders = {};
 
         sortHeaders.forEach(header => {
-            const sort = header.getAttribute('data-sort');
+            const sort = header.dataset.sort;
             const sortSymbol = document.createElement('span');
             sortSymbol.classList.add('sort-symbol');
             header.prepend(sortSymbol);
@@ -135,7 +135,7 @@
         if (sortField) sortField.parentElement.style.display = 'none';
 
         sortHeaders.forEach(header => {
-            const sort = header.getAttribute('data-sort');
+            const sort = header.dataset.sort;
 
             header.addEventListener('click', event => {
                 event.preventDefault();
@@ -154,7 +154,7 @@
                 sortForm.submit();
 
                 sortHeaders.forEach(header => {
-                    const headerSort = header.getAttribute('data-sort');
+                    const headerSort = header.dataset.sort;
                     const headerSortSymbol = header.querySelector('.sort-symbol');
                     headerSortSymbol.innerHTML = '';
                     if (sortOrders[headerSort]) {

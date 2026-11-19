@@ -8,6 +8,7 @@ import {
 import TapirButton from "../../components/TapirButton.tsx";
 import TapirHelpButton from "../../components/TapirHelpButton.tsx";
 import { useApi } from "../../hooks/useApi.ts";
+import { toApiDate } from "../../utils/apiDate.ts";
 import { formatCurrency } from "../../utils/formatCurrency.ts";
 import { formatDateNumeric } from "../../utils/formatDateNumeric.ts";
 import { getCsrfToken } from "../../utils/getCsrfToken.ts";
@@ -15,14 +16,19 @@ import { handleRequestError } from "../../utils/handleRequestError.ts";
 
 interface MemberProfileSolidarityContributionCardProps {
   memberId: string;
-  adminEmail: string;
+  contactEmail: string;
   adminVersion: boolean;
   membersCanChangeContribution: boolean;
 }
 
 const MemberProfileSolidarityContributionCard: React.FC<
   MemberProfileSolidarityContributionCardProps
-> = ({ memberId, adminEmail, adminVersion, membersCanChangeContribution }) => {
+> = ({
+  memberId,
+  contactEmail,
+  adminVersion,
+  membersCanChangeContribution,
+}) => {
   const api = useApi(SolidarityContributionApi, getCsrfToken());
   const [loading, setLoading] = useState(true);
   const [solidarityContributions, setSolidarityContributions] = useState<
@@ -31,9 +37,10 @@ const MemberProfileSolidarityContributionCard: React.FC<
   const [modalOpen, setModalOpen] = useState(false);
   const [newContributionAsString, setNewContributionAsString] = useState("0");
   const [showValidation, setShowValidation] = useState(false);
-  const [changeValidFrom, setChangeValidFrom] = useState(new Date());
-  const [alternativeChangeValidFrom, setAlternativeChangeValidFrom] =
-    useState<Date | null>(null);
+  const [changeValidFrom, setChangeValidFrom] = useState(toApiDate(new Date()));
+  const [alternativeChangeValidFrom, setAlternativeChangeValidFrom] = useState<
+    string | null
+  >(null);
   const [userCanSetLowerValue, setUserCanSetLowerValue] = useState(false);
   const [userCanUpdateContribution, setUserCanUpdateContribution] =
     useState(false);
@@ -53,11 +60,8 @@ const MemberProfileSolidarityContributionCard: React.FC<
         setUserCanSetLowerValue(response.userCanSetLowerValue);
         setUserCanUpdateContribution(response.userCanUpdateContribution);
       })
-      .catch(async (error) => {
-        await handleRequestError(
-          error,
-          "Fehler beim Laden des Solidarbeitrags.",
-        );
+      .catch((error) => {
+        handleRequestError(error, "Fehler beim Laden des Solidarbeitrags.");
       })
       .finally(() => setLoading(false));
   }, [memberId]);
@@ -103,11 +107,8 @@ const MemberProfileSolidarityContributionCard: React.FC<
         }
         setSolidarityContributions(result.contributions);
       })
-      .catch(async (error) => {
-        await handleRequestError(
-          error,
-          "Fehler beim Speichern des Solidarbeitrags.",
-        );
+      .catch((error) => {
+        handleRequestError(error, "Fehler beim Speichern des Solidarbeitrags.");
       })
       .finally(() => setLoading(false));
   }
@@ -133,7 +134,7 @@ const MemberProfileSolidarityContributionCard: React.FC<
 
   function getCurrentContribution() {
     for (const contribution of solidarityContributions) {
-      const today = new Date();
+      const today = toApiDate(new Date());
       if (contribution.startDate <= today && today <= contribution.endDate) {
         return contribution;
       }
@@ -150,7 +151,7 @@ const MemberProfileSolidarityContributionCard: React.FC<
   }
 
   function buildFutureContributions() {
-    const today = new Date();
+    const today = toApiDate(new Date());
     const futureContributions = solidarityContributions.filter(
       (contribution) => contribution.startDate > today,
     );
@@ -204,17 +205,18 @@ const MemberProfileSolidarityContributionCard: React.FC<
   }
 
   function buildHelpText() {
-    const adminEmailLink = <a href={"mailto:" + adminEmail}>{adminEmail}</a>;
+    const contactEmailLink = (
+      <a href={"mailto:" + contactEmail}>{contactEmail}</a>
+    );
 
     if (adminVersion) {
       if (membersCanChangeContribution) {
         return (
           <p className={"mb-0"}>
             Beachte: Das Mitglied kann den Solidarbeitrag nur nach oben
-            verändern. Nur du als Admin kannst ihn reduzieren. Dem Mitglied
-            wird in dem Hilfetext, der ihm eingeblendet wird, kommuniziert,
-            dass es Kontakt zu dir aufnehmen muss, um den Solidarbeitrag zu
-            reduzieren.
+            verändern. Nur du als Admin kannst ihn reduzieren. Dem Mitglied wird
+            in dem Hilfetext, der ihm eingeblendet wird, kommuniziert, dass es
+            Kontakt zu dir aufnehmen muss, um den Solidarbeitrag zu reduzieren.
           </p>
         );
       }
@@ -233,14 +235,15 @@ const MemberProfileSolidarityContributionCard: React.FC<
       return (
         <p className={"mb-0"}>
           Beachte: Du kannst deinen Solidarbeitrag nur nach oben verändern. Um
-          ihn zu reduzieren, kontaktiere deinen Betrieb ({adminEmailLink}).
+          ihn zu reduzieren, wende dich bitte an die Verwaltung (
+          {contactEmailLink}).
         </p>
       );
     }
     return (
       <p className={"mb-0"}>
-        Beachte: Du kannst deinen Solidarbeitrag nicht selbstständig
-        anpassen. Kontaktiere dazu deinen Betrieb ({adminEmailLink}).
+        Beachte: Du kannst deinen Solidarbeitrag nicht selbstständig anpassen.
+        Wende dich dazu bitte an die Verwaltung ({contactEmailLink}).
       </p>
     );
   }
@@ -356,7 +359,7 @@ const MemberProfileSolidarityContributionCard: React.FC<
                 <>
                   <Form.Text className={"text-danger"}>
                     Du kannst deinen Beitrag nicht selber nach unten anpassen.
-                    Kontaktiere bitte {adminEmail}.
+                    Bitte wende dich an die Verwaltung ({contactEmail}).
                   </Form.Text>
                   <br />
                 </>
@@ -369,7 +372,9 @@ const MemberProfileSolidarityContributionCard: React.FC<
           </Modal.Body>
           <Modal.Footer>
             <span
-              className={"d-flex justify-content-between align-items-center"}
+              className={
+                "d-flex flex-wrap justify-content-between align-items-center gap-2"
+              }
               style={{ width: "100%" }}
             >
               <TapirButton

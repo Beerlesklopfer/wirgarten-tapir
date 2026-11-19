@@ -10,7 +10,7 @@ from tapir.log.util import freeze_for_log
 
 class LogEntry(models.Model):
     created_date = models.DateTimeField(
-        auto_now_add=True, verbose_name=_("Creation Date")
+        auto_now_add=True, verbose_name=_("Erstellungsdatum")
     )
 
     actor = models.ForeignKey(
@@ -80,7 +80,6 @@ class LogEntry(models.Model):
 
     def render(self):
         """Render this LogEntry"""
-        # TODO: This really belongs in some sort of view class, it's only here for convenience
         return render_to_string(self.template_name, self.get_context_data())
 
 

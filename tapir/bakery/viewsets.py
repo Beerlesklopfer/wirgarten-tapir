@@ -1,7 +1,7 @@
 from functools import cached_property
 
 from django.db import transaction
-from django.db.models import Exists, OuterRef, ProtectedError
+from django.db.models import Exists, OuterRef, Prefetch, ProtectedError
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import permissions, status, viewsets
@@ -14,22 +14,27 @@ from tapir.bakery.models import (
     Bread,
     BreadContent,
     BreadDelivery,
+    BreadGroup,
     BreadLabel,
     BreadSpecificsPerDeliveryDay,
     BreadsPerPickupLocationPerWeek,
+    BreadsToBakePerWeek,
     Ingredient,
     PreferredBread,
     StoveSession,
 )
+from tapir.bakery.permissions import IsReadOnly
 from tapir.bakery.serializers import (
     BreadContentSerializer,
     BreadDeliverySerializer,
     BreadDetailSerializer,
+    BreadGroupSerializer,
     BreadLabelSerializer,
     BreadListSerializer,
     BreadSpecificsPerDeliveryDayBulkUpdateSerializer,
     BreadSpecificsPerDeliveryDaySerializer,
     BreadsPerPickupLocationPerWeekSerializer,
+    BreadsToBakePerWeekSerializer,
     IngredientSerializer,
     PreferredBreadsBulkUpdateSerializer,
     PreferredBreadSerializer,
@@ -46,7 +51,6 @@ from tapir.bakery.services.bread_delivery_context_service import (
     BreadDeliveryContextService,
 )
 from tapir.bakery.utils import int_query_param, str_to_bool
-from tapir.bakery.permissions import IsReadOnly
 from tapir.generic_exports.permissions import HasCoopManagePermission
 from tapir.pickup_locations.services.pickup_location_delivery_day_service import (
     PickupLocationDeliveryDayService,
@@ -100,6 +104,18 @@ class BreadLabelViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema(tags=["bakery"])
+class BreadGroupViewSet(viewsets.ModelViewSet):
+    queryset = BreadGroup.objects.prefetch_related(
+        Prefetch("breads", queryset=Bread.objects.order_by("name"))
+    ).order_by("name")
+    serializer_class = BreadGroupSerializer
+    permission_classes = [
+        permissions.IsAuthenticated,
+        IsReadOnly | HasCoopManagePermission,
+    ]
+
+
+@extend_schema(tags=["bakery"])
 class IngredientViewSet(ProtectedDeleteMixin, viewsets.ModelViewSet):
     protected_delete_message = (
         "Diese Zutat wird noch in Rezepten verwendet und kann nicht gelöscht werden."
@@ -144,7 +160,11 @@ class BreadViewSet(RequestCacheMixin, ProtectedDeleteMixin, viewsets.ModelViewSe
         "werden. Setze es stattdessen auf inaktiv."
     )
 
-    queryset = Bread.objects.prefetch_related("labels", "contents__ingredient").all()
+    queryset = (
+        Bread.objects.select_related("group")
+        .prefetch_related("labels", "contents__ingredient")
+        .all()
+    )
     permission_classes = [
         permissions.IsAuthenticated,
         IsReadOnly | HasCoopManagePermission,
@@ -502,11 +522,63 @@ class StoveSessionViewSet(viewsets.ReadOnlyModelViewSet):
         if delivery_day is not None:
             queryset = queryset.filter(delivery_day=delivery_day)
 
-        return queryset.order_by("session_number", "layer_number")
+        # The bread name keeps a shared layer's breads in a stable order.
+        return queryset.order_by("session_number", "layer_number", "bread__name")
 
 
 @extend_schema(tags=["bakery"])
-class BreadsPerPickupLocationPerWeekViewSet(viewsets.ReadOnlyModelViewSet):
+class BreadsToBakePerWeekViewSet(viewsets.ReadOnlyModelViewSet):
+    """The solver's total per bread, including breads with fixed_pieces that
+    occupy no stove layers."""
+
+    queryset = BreadsToBakePerWeek.objects.select_related("bread").all()
+    serializer_class = BreadsToBakePerWeekSerializer
+    permission_classes = [permissions.IsAuthenticated, HasCoopManagePermission]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="year",
+                type=int,
+                required=False,
+            ),
+            OpenApiParameter(
+                name="delivery_week",
+                type=int,
+                required=False,
+            ),
+            OpenApiParameter(
+                name="delivery_day",
+                type=int,
+                required=False,
+            ),
+        ],
+        responses={200: BreadsToBakePerWeekSerializer(many=True)},
+    )
+    def list(self, request: Request, *args, **kwargs) -> Response:
+        return super().list(request, *args, **kwargs)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        year = int_query_param(self.request, "year")
+        delivery_week = int_query_param(self.request, "delivery_week")
+        delivery_day = int_query_param(self.request, "delivery_day")
+
+        if year is not None:
+            queryset = queryset.filter(year=year)
+        if delivery_week is not None:
+            queryset = queryset.filter(delivery_week=delivery_week)
+        if delivery_day is not None:
+            queryset = queryset.filter(delivery_day=delivery_day)
+
+        return queryset.order_by("bread__name")
+
+
+@extend_schema(tags=["bakery"])
+class BreadsPerPickupLocationPerWeekViewSet(
+    RequestCacheMixin, viewsets.ReadOnlyModelViewSet
+):
     """The solver's distribution result per pickup location and week."""
 
     queryset = BreadsPerPickupLocationPerWeek.objects.select_related(
@@ -554,7 +626,7 @@ class BreadsPerPickupLocationPerWeekViewSet(viewsets.ReadOnlyModelViewSet):
             # not merely any day it is open.
             queryset = queryset.filter(
                 pickup_location_id__in=PickupLocationDeliveryDayService.get_pickup_location_ids_for_delivery_day(
-                    day=delivery_day, cache={}
+                    day=delivery_day, cache=self.tapir_cache
                 )
             )
 

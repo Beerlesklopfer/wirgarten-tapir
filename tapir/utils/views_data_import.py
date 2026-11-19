@@ -42,7 +42,7 @@ class DataImportView(LoginRequiredMixin, PermissionRequiredMixin, FormView):
         context_data["page_title"] = "Datenübernahme"
         context_data["import_types"] = IMPORT_TYPES.values()
         context_data["members_without_login"] = (
-            ActivationMailService.get_members_without_login().count()
+            ActivationMailService.get_members_without_login(cache={}).count()
         )
         return context_data
 
@@ -140,7 +140,7 @@ class DataImportActivationView(LoginRequiredMixin, PermissionRequiredMixin, View
     permission_required = Permission.Coop.MANAGE
 
     def post(self, request, *args, **kwargs):
-        sent, errors = ActivationMailService.send(actor=request.user)
+        sent, errors = ActivationMailService.send(actor=request.user, cache={})
         if sent:
             messages.success(request, f"{sent} Aktivierungsmails verschickt.")
         for error in errors:

@@ -20,7 +20,13 @@ from tapir.utils.config import (
     MEMBER_IMPORT_STATUS_CREATED,
     MEMBER_IMPORT_STATUS_UPDATED,
 )
-from tapir.utils.exceptions import DryRunException
+from tapir.utils.exceptions import TapirDataImportException
+from tapir.utils.models import (
+    CoopSharesImportedLogEntry,
+    CoopSharesImportUpdatedLogEntry,
+    SubscriptionImportedLogEntry,
+    SubscriptionImportUpdatedLogEntry,
+)
 from tapir.utils.services.member_importer import MemberImporter
 from tapir.utils.services.share_importer import ShareImporter
 from tapir.utils.services.subscription_importer import SubscriptionImporter
@@ -78,10 +84,32 @@ class Command(BaseCommand):
             help="If enabled, will print the stacktrace for all errors. Otherwise, only a short summary will be printed",
         )
 
+    def confirm_reset_all(self) -> bool:
+        self.stdout.write(
+            "--reset-all deletes ALL members (including their Keycloak accounts), shares, subscriptions, "
+            "payments, mandate references, pickup location assignments, log entries and all other member "
+            "related data, then exits without importing anything. "
+            "The deletion is not done in a transaction and can't be undone.\n"
+            "--delete-all on the other hand only deletes the data related to the given --type "
+            "(members: same as --reset-all, shares: share transactions, subscriptions: subscriptions and "
+            "non-share payments), inside the same transaction as the import, then runs the import. "
+            "It can be combined with --dry-run."
+        )
+        answer = input("Are you sure you want to reset all data? [y/N] ").lower()
+        return answer in ["y", "yes"]
+
     def handle(self, *args, **options):
         # Helper functions
+        dry_run = options.get("dry_run", False)
 
         if options["reset_all"]:
+            if dry_run:
+                raise TapirDataImportException(
+                    "Can't use reset_all and dry_run at the same time"
+                )
+            if not self.confirm_reset_all():
+                self.stdout.write("Aborting")
+                return
             SolidarityContribution.objects.all().delete()
             SubscriptionChangeLogEntry.objects.all().delete()
             TransferCoopSharesLogEntry.objects.all().delete()
@@ -97,11 +125,8 @@ class Command(BaseCommand):
             EmailChangeRequest.objects.all().delete()
             MemberCredit.objects.all().delete()
             Joker.objects.all().delete()
-            cache = {}
             for member in Member.objects.all():
-                KeycloakUserDeleteService.delete_user_if_exists(
-                    user=member, cache=cache
-                )
+                KeycloakUserDeleteService.delete_user_if_exists(user=member)
                 member.delete()
             return
 
@@ -120,7 +145,7 @@ class Command(BaseCommand):
         filepath = options["file"][0]
         import_type = options["type"][0]
         delete_all = options["delete_all"]
-        dry_run = options.get("dry_run", False)
+
         print_stacktrace = options.get("stacktrace", False)
         update_existing = options.get("update")[0] == "yes"
 
@@ -134,54 +159,55 @@ class Command(BaseCommand):
             self.verify_csv(data.headers, reader)
             return
 
-        try:
-            with transaction.atomic():
-                if delete_all:
-                    if import_type == "members":
-                        SolidarityContribution.objects.all().delete()
-                        SubscriptionChangeLogEntry.objects.all().delete()
-                        TransferCoopSharesLogEntry.objects.all().delete()
-                        CoopShareTransaction.objects.all().delete()
-                        Subscription.objects.all().delete()
-                        Payment.objects.all().delete()
-                        MandateReference.objects.all().delete()
-                        MemberPickupLocation.objects.all().delete()
-                        LogEntry.objects.all().delete()
-                        QuestionaireCancellationReasonResponse.objects.all().delete()
-                        QuestionaireTrafficSourceResponse.objects.all().delete()
-                        WaitingListEntry.objects.all().delete()
-                        EmailChangeRequest.objects.all().delete()
-                        MemberCredit.objects.all().delete()
-                        Joker.objects.all().delete()
-                        cache = {}
-                        for member in Member.objects.all():
-                            KeycloakUserDeleteService.delete_user_if_exists(
-                                user=member, cache=cache
-                            )
-                            member.delete()
+        with transaction.atomic():
+            if delete_all:
+                if import_type == "members":
+                    SolidarityContribution.objects.all().delete()
+                    SubscriptionChangeLogEntry.objects.all().delete()
+                    TransferCoopSharesLogEntry.objects.all().delete()
+                    CoopShareTransaction.objects.all().delete()
+                    Subscription.objects.all().delete()
+                    Payment.objects.all().delete()
+                    MandateReference.objects.all().delete()
+                    MemberPickupLocation.objects.all().delete()
+                    LogEntry.objects.all().delete()
+                    QuestionaireCancellationReasonResponse.objects.all().delete()
+                    QuestionaireTrafficSourceResponse.objects.all().delete()
+                    WaitingListEntry.objects.all().delete()
+                    EmailChangeRequest.objects.all().delete()
+                    MemberCredit.objects.all().delete()
+                    Joker.objects.all().delete()
+                    for member in Member.objects.all():
+                        if not dry_run:
+                            # The dry run's transaction rollback doesn't undo keycloak account deletion
+                            KeycloakUserDeleteService.delete_user_if_exists(user=member)
+                        member.delete()
 
-                    if import_type == "shares":
-                        TransferCoopSharesLogEntry.objects.all().delete()
-                        CoopShareTransaction.objects.all().delete()
+                if import_type == "shares":
+                    TransferCoopSharesLogEntry.objects.all().delete()
+                    CoopSharesImportedLogEntry.objects.all().delete()
+                    CoopSharesImportUpdatedLogEntry.objects.all().delete()
+                    CoopShareTransaction.objects.all().delete()
 
-                    if import_type == "subscriptions":
-                        SubscriptionChangeLogEntry.objects.all().delete()
-                        Subscription.objects.all().delete()
-                        PaymentTransaction.objects.exclude(
-                            type=PAYMENT_TYPE_COOP_SHARES
-                        ).delete()
-                        Payment.objects.exclude(type=PAYMENT_TYPE_COOP_SHARES).delete()
+                if import_type == "subscriptions":
+                    SubscriptionChangeLogEntry.objects.all().delete()
+                    SubscriptionImportedLogEntry.objects.all().delete()
+                    SubscriptionImportUpdatedLogEntry.objects.all().delete()
+                    Subscription.objects.all().delete()
+                    PaymentTransaction.objects.exclude(
+                        type=PAYMENT_TYPE_COOP_SHARES
+                    ).delete()
+                    Payment.objects.exclude(type=PAYMENT_TYPE_COOP_SHARES).delete()
 
-                self.import_generic(
-                    reader=reader,
-                    update_existing=update_existing,
-                    import_type=import_type,
-                    print_stacktrace=print_stacktrace,
-                )
-                if dry_run:
-                    raise DryRunException()
-        except DryRunException:
-            pass
+            self.import_generic(
+                reader=reader,
+                update_existing=update_existing,
+                import_type=import_type,
+                print_stacktrace=print_stacktrace,
+                dry_run=dry_run,
+            )
+            if dry_run:
+                transaction.set_rollback(True)
 
     def verify_csv(self, cleaned_headers: list[str], reader):
         self.stdout.write(f"Cleaned headers: {cleaned_headers}")
@@ -205,23 +231,34 @@ class Command(BaseCommand):
         update_existing: bool,
         import_type: Literal["members", "shares", "subscriptions"],
         print_stacktrace: bool,
+        dry_run: bool,
     ):
         skipped = 0
         created = 0
         updated = 0
 
+        if import_type not in ["members", "shares", "subscriptions"]:
+            raise TapirDataImportException(f"Unknown import type: {import_type}")
+
         for row_index, row in enumerate(reader):
             try:
-                match import_type:
-                    case "members":
-                        method = MemberImporter.import_member
-                    case "shares":
-                        method = ShareImporter.import_shares_single_member
-                    case "subscriptions":
-                        method = SubscriptionImporter.import_subscription
-
                 with transaction.atomic():
-                    import_status = method(row=row, update_existing=update_existing)
+                    match import_type:
+                        case "members":
+                            import_status = MemberImporter.import_member(
+                                row=row,
+                                update_existing=update_existing,
+                                dry_run=dry_run,
+                                stdout=self.stdout,
+                            )
+                        case "shares":
+                            import_status = ShareImporter.import_shares_single_member(
+                                row=row, update_existing=update_existing
+                            )
+                        case "subscriptions":
+                            import_status = SubscriptionImporter.import_subscription(
+                                row=row, update_existing=update_existing
+                            )
 
                 if import_status == MEMBER_IMPORT_STATUS_SKIPPED:
                     skipped += 1

@@ -1,5 +1,7 @@
 import datetime
 
+from django.db import models
+from django.urls import reverse
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
@@ -7,9 +9,11 @@ from tapir.bakery.models import (
     Bread,
     BreadContent,
     BreadDelivery,
+    BreadGroup,
     BreadLabel,
     BreadSpecificsPerDeliveryDay,
     BreadsPerPickupLocationPerWeek,
+    BreadsToBakePerWeek,
     Ingredient,
     PreferredBread,
     StoveSession,
@@ -47,6 +51,9 @@ def _get_pickup_location_delivery_day(serializer, obj) -> int | None:
     )
 
 
+BREAD_NAME_SOURCE = "bread.name"
+
+
 class BreadLabelSerializer(serializers.ModelSerializer):
     class Meta:
         model = BreadLabel
@@ -54,6 +61,21 @@ class BreadLabelSerializer(serializers.ModelSerializer):
         # A TapirModel id is a plain CharField, which DRF would otherwise leave
         # writable under fields="__all__".
         read_only_fields = ["id"]
+
+
+class BreadGroupSerializer(serializers.ModelSerializer):
+    bread_names = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BreadGroup
+        fields = "__all__"
+        # See BreadLabelSerializer.
+        read_only_fields = ["id"]
+
+    def get_bread_names(self, obj) -> list[str]:
+        # BreadGroupViewSet prefetches them in the database's name order, the
+        # one the oven plan and the baking list use.
+        return [bread.name for bread in obj.breads.all()]
 
 
 class IngredientSerializer(serializers.ModelSerializer):
@@ -83,6 +105,23 @@ class BreadContentSerializer(serializers.ModelSerializer):
         read_only_fields = ["id"]
 
 
+class BreadPictureField(serializers.ImageField):
+    def to_representation(self, value):
+        if not value:
+            return None
+        url = reverse("bakery:bread-picture", args=[value.instance.id])
+        # The stored name changes on every upload, which busts browser caches.
+        url = f"{url}?v={value.name.rsplit('/', 1)[-1]}"
+        request = self.context.get("request")
+        return request.build_absolute_uri(url) if request else url
+
+
+BREAD_PICTURE_FIELD_MAPPING = {
+    **serializers.ModelSerializer.serializer_field_mapping,
+    models.ImageField: BreadPictureField,
+}
+
+
 PIECE_COUNT_LIMITS = {
     field: {"max_value": MAX_PIECES_PER_ENTRY}
     for field in ["min_pieces", "max_pieces", "min_remaining_pieces"]
@@ -90,10 +129,14 @@ PIECE_COUNT_LIMITS = {
 
 
 class BreadListSerializer(serializers.ModelSerializer):
+    serializer_field_mapping = BREAD_PICTURE_FIELD_MAPPING
     capacity = serializers.IntegerField(read_only=True, required=False)
     delivery_count = serializers.IntegerField(read_only=True, required=False)
     available_capacity = serializers.IntegerField(read_only=True, required=False)
     contents = BreadContentSerializer(many=True, read_only=True)
+    group_name = serializers.CharField(
+        source="group.name", read_only=True, allow_null=True
+    )
 
     class Meta:
         model = Bread
@@ -104,6 +147,7 @@ class BreadListSerializer(serializers.ModelSerializer):
 
 
 class BreadDetailSerializer(serializers.ModelSerializer):
+    serializer_field_mapping = BREAD_PICTURE_FIELD_MAPPING
     labels = BreadLabelSerializer(many=True, read_only=True)
     contents = BreadContentSerializer(many=True, read_only=True)
     label_names = serializers.SerializerMethodField()
@@ -139,7 +183,7 @@ class BreadDetailSerializer(serializers.ModelSerializer):
 
 
 class BreadDeliverySerializer(serializers.ModelSerializer):
-    bread_name = serializers.CharField(source="bread.name", read_only=True)
+    bread_name = serializers.CharField(source=BREAD_NAME_SOURCE, read_only=True)
     pickup_location = serializers.SerializerMethodField()
     pickup_location_name = serializers.SerializerMethodField()
     pickup_location_street = serializers.SerializerMethodField()
@@ -452,7 +496,7 @@ class SolverApplyResponseSerializer(serializers.Serializer):
 
 
 class StoveSessionSerializer(serializers.ModelSerializer):
-    bread_name = serializers.CharField(source="bread.name", read_only=True)
+    bread_name = serializers.CharField(source=BREAD_NAME_SOURCE, read_only=True)
 
     class Meta:
         model = StoveSession
@@ -460,8 +504,17 @@ class StoveSessionSerializer(serializers.ModelSerializer):
         read_only_fields = ["id"]
 
 
+class BreadsToBakePerWeekSerializer(serializers.ModelSerializer):
+    bread_name = serializers.CharField(source=BREAD_NAME_SOURCE, read_only=True)
+
+    class Meta:
+        model = BreadsToBakePerWeek
+        fields = "__all__"
+        read_only_fields = ["id"]
+
+
 class BreadsPerPickupLocationPerWeekSerializer(serializers.ModelSerializer):
-    bread_name = serializers.CharField(source="bread.name", read_only=True)
+    bread_name = serializers.CharField(source=BREAD_NAME_SOURCE, read_only=True)
     pickup_location_name = serializers.CharField(
         source="pickup_location.name", read_only=True
     )
@@ -517,7 +570,7 @@ class PreferenceSatisfactionResponseSerializer(serializers.Serializer):
 
 
 class BreadSpecificsPerDeliveryDaySerializer(serializers.ModelSerializer):
-    bread_name = serializers.CharField(source="bread.name", read_only=True)
+    bread_name = serializers.CharField(source=BREAD_NAME_SOURCE, read_only=True)
 
     class Meta:
         model = BreadSpecificsPerDeliveryDay

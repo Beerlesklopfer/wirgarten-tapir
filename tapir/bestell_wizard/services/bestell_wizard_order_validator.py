@@ -9,10 +9,20 @@ from tapir.bestell_wizard.services.questionnaire_source_service import (
     QuestionnaireSourceService,
 )
 from tapir.configuration.parameter import get_parameter_value
+from tapir.coop.services.coop_share_instalment_order_validator import (
+    CoopShareInstalmentOrderValidator,
+)
 from tapir.coop.services.minimum_number_of_shares_validator import (
     MinimumNumberOfSharesValidator,
 )
 from tapir.coop.services.personal_data_validator import PersonalDataValidator
+from tapir.pickup_locations.services.home_delivery_address_validator import (
+    HomeDeliveryAddressValidator,
+)
+from tapir.pickup_locations.services.member_delivery_address_getter import (
+    DeliveryAddressInput,
+    MemberDeliveryAddressGetter,
+)
 from tapir.pickup_locations.services.pickup_location_capacity_general_checker import (
     PickupLocationCapacityGeneralChecker,
 )
@@ -100,9 +110,10 @@ class BestellWizardOrderValidator:
         if not SolidarityValidator.is_the_ordered_solidarity_allowed(
             amount=validated_serializer_data["solidarity_contribution"],
             start_date=contract_start_date,
+            order=order,
             cache=cache,
         ):
-            raise ValidationError("Solidarbeitrag ungültig oder zu niedrig")
+            raise ValidationError("Solidarbeitrag zu niedrig")
 
         if legal_status_is_cooperative(cache=cache):
             cls.validate_coop_content(
@@ -120,6 +131,26 @@ class BestellWizardOrderValidator:
         cls.validate_distribution_channels(
             validated_serializer_data["distribution_channels"], cache=cache
         )
+
+    @classmethod
+    def validate_home_delivery_address(
+        cls,
+        pickup_location_ids: list[str],
+        delivery_address_input: DeliveryAddressInput,
+        personal_data: dict,
+        cache: dict,
+    ):
+        delivery_address = MemberDeliveryAddressGetter.get_delivery_address_from_input(
+            delivery_address_input=delivery_address_input,
+            personal_data=personal_data,
+        )
+        for pickup_location_id in pickup_location_ids:
+            HomeDeliveryAddressValidator.validate_address(
+                delivery_address=delivery_address,
+                pickup_location=TapirCache.get_pickup_location_by_id(
+                    cache=cache, pickup_location_id=pickup_location_id
+                ),
+            )
 
     @classmethod
     def validate_distribution_channels(cls, given_channel_ids: list[str], cache: dict):
@@ -159,11 +190,6 @@ class BestellWizardOrderValidator:
         order: TapirOrder,
         cache: dict,
     ):
-        if len(order) > 0 and get_parameter_value(
-            ParameterKeys.BESTELLWIZARD_FORCE_WAITING_LIST, cache=cache
-        ):
-            raise ValidationError("Nur Warteliste-Einträge sind erlaubt.")
-
         pickup_location = None
         if OrderValidator.does_order_need_a_pickup_location(order=order, cache=cache):
             if len(pickup_location_ids) == 0:
@@ -207,10 +233,15 @@ class BestellWizardOrderValidator:
             raise ValidationError("Studenten-Status ist nicht erlaubt")
 
         nb_ordered_coop_shares = validated_data["number_of_coop_shares"]
+        pay_in_instalments = validated_data["pay_coop_shares_in_instalments"]
         if student_status_enabled:
             if nb_ordered_coop_shares > 0:
                 raise ValidationError(
                     "Studenten-Status aktiviert, es sollen keine Genossenschaftsanteilen bestellt werden."
+                )
+            if pay_in_instalments:
+                raise ValidationError(
+                    "Studenten-Status aktiviert, Ratenzahlung ist nicht möglich."
                 )
         else:
             if not validated_data["statute_accepted"]:
@@ -222,6 +253,12 @@ class BestellWizardOrderValidator:
             if nb_ordered_coop_shares < minimum_number_of_shares:
                 raise ValidationError(
                     f"Genossenschaftsanteile bestellt: {nb_ordered_coop_shares}, minimum: {minimum_number_of_shares}."
+                )
+            if pay_in_instalments:
+                CoopShareInstalmentOrderValidator.validate_instalments(
+                    number_of_coop_shares=nb_ordered_coop_shares,
+                    minimum_number_of_coop_shares=minimum_number_of_shares,
+                    cache=cache,
                 )
 
     @classmethod

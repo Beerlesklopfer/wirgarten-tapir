@@ -101,6 +101,12 @@ export interface BestellWizardStrings {
    * @type {string}
    * @memberof BestellWizardStrings
    */
+  step4bBasePriceLabel: string;
+  /**
+   *
+   * @type {string}
+   * @memberof BestellWizardStrings
+   */
   step4dTitle: string;
   /**
    *
@@ -137,6 +143,12 @@ export interface BestellWizardStrings {
    * @type {string}
    * @memberof BestellWizardStrings
    */
+  step5bHomeDeliveryTitle: string;
+  /**
+   *
+   * @type {string}
+   * @memberof BestellWizardStrings
+   */
   step5cTitle: string;
   /**
    *
@@ -144,6 +156,12 @@ export interface BestellWizardStrings {
    * @memberof BestellWizardStrings
    */
   step5cText: string;
+  /**
+   *
+   * @type {string}
+   * @memberof BestellWizardStrings
+   */
+  homeDeliveryChoiceText: string;
   /**
    *
    * @type {string}
@@ -180,12 +198,6 @@ export interface BestellWizardStrings {
    * @memberof BestellWizardStrings
    */
   step6cCheckboxStatute: string;
-  /**
-   *
-   * @type {string}
-   * @memberof BestellWizardStrings
-   */
-  step6cTextStatute: string;
   /**
    *
    * @type {string}
@@ -329,6 +341,12 @@ export interface BestellWizardStrings {
    * @type {string}
    * @memberof BestellWizardStrings
    */
+  step14BackToWebsiteButtonText: string;
+  /**
+   *
+   * @type {string}
+   * @memberof BestellWizardStrings
+   */
   privacyPolicyUrl: string;
   /**
    *
@@ -383,6 +401,11 @@ export function instanceOfBestellWizardStrings(
     value["step4bWaitingListModalText"] === undefined
   )
     return false;
+  if (
+    !("step4bBasePriceLabel" in value) ||
+    value["step4bBasePriceLabel"] === undefined
+  )
+    return false;
   if (!("step4dTitle" in value) || value["step4dTitle"] === undefined)
     return false;
   if (!("step4dText" in value) || value["step4dText"] === undefined)
@@ -398,9 +421,19 @@ export function instanceOfBestellWizardStrings(
     return false;
   if (!("step5bTitle" in value) || value["step5bTitle"] === undefined)
     return false;
+  if (
+    !("step5bHomeDeliveryTitle" in value) ||
+    value["step5bHomeDeliveryTitle"] === undefined
+  )
+    return false;
   if (!("step5cTitle" in value) || value["step5cTitle"] === undefined)
     return false;
   if (!("step5cText" in value) || value["step5cText"] === undefined)
+    return false;
+  if (
+    !("homeDeliveryChoiceText" in value) ||
+    value["homeDeliveryChoiceText"] === undefined
+  )
     return false;
   if (!("step6aTitle" in value) || value["step6aTitle"] === undefined)
     return false;
@@ -418,11 +451,6 @@ export function instanceOfBestellWizardStrings(
   if (
     !("step6cCheckboxStatute" in value) ||
     value["step6cCheckboxStatute"] === undefined
-  )
-    return false;
-  if (
-    !("step6cTextStatute" in value) ||
-    value["step6cTextStatute"] === undefined
   )
     return false;
   if (
@@ -497,6 +525,11 @@ export function instanceOfBestellWizardStrings(
     return false;
   if (!("step14bText" in value) || value["step14bText"] === undefined)
     return false;
+  if (
+    !("step14BackToWebsiteButtonText" in value) ||
+    value["step14BackToWebsiteButtonText"] === undefined
+  )
+    return false;
   if (!("privacyPolicyUrl" in value) || value["privacyPolicyUrl"] === undefined)
     return false;
   if (
@@ -537,14 +570,17 @@ export function BestellWizardStringsFromJSONTyped(
     step3bText: json["step3b_text"],
     step4bWaitingListModalTitle: json["step4b_waiting_list_modal_title"],
     step4bWaitingListModalText: json["step4b_waiting_list_modal_text"],
+    step4bBasePriceLabel: json["step4b_base_price_label"],
     step4dTitle: json["step4d_title"],
     step4dText: json["step4d_text"],
     step4dTextSupportingMember: json["step4d_text_supporting_member"],
     step5aTitle: json["step5a_title"],
     step5aText: json["step5a_text"],
     step5bTitle: json["step5b_title"],
+    step5bHomeDeliveryTitle: json["step5b_home_delivery_title"],
     step5cTitle: json["step5c_title"],
     step5cText: json["step5c_text"],
+    homeDeliveryChoiceText: json["home_delivery_choice_text"],
     step6aTitle: json["step6a_title"],
     step6aText: json["step6a_text"],
     step6bTitle: json["step6b_title"],
@@ -552,7 +588,6 @@ export function BestellWizardStringsFromJSONTyped(
     step6bCheckboxStatuteAssociations:
       json["step6b_checkbox_statute_associations"],
     step6cCheckboxStatute: json["step6c_checkbox_statute"],
-    step6cTextStatute: json["step6c_text_statute"],
     step6cCheckboxCommitment: json["step6c_checkbox_commitment"],
     step6cTitle: json["step6c_title"],
     step6cText: json["step6c_text"],
@@ -576,6 +611,7 @@ export function BestellWizardStringsFromJSONTyped(
     step14Text: json["step14_text"],
     step14bTitle: json["step14b_title"],
     step14bText: json["step14b_text"],
+    step14BackToWebsiteButtonText: json["step14_back_to_website_button_text"],
     privacyPolicyUrl: json["privacy_policy_url"],
     labelStudentCheckbox: json["label_student_checkbox"],
     studentCheckboxExplanationText: json["student_checkbox_explanation_text"],
@@ -608,14 +644,17 @@ export function BestellWizardStringsToJSONTyped(
     step3b_text: value["step3bText"],
     step4b_waiting_list_modal_title: value["step4bWaitingListModalTitle"],
     step4b_waiting_list_modal_text: value["step4bWaitingListModalText"],
+    step4b_base_price_label: value["step4bBasePriceLabel"],
     step4d_title: value["step4dTitle"],
     step4d_text: value["step4dText"],
     step4d_text_supporting_member: value["step4dTextSupportingMember"],
     step5a_title: value["step5aTitle"],
     step5a_text: value["step5aText"],
     step5b_title: value["step5bTitle"],
+    step5b_home_delivery_title: value["step5bHomeDeliveryTitle"],
     step5c_title: value["step5cTitle"],
     step5c_text: value["step5cText"],
+    home_delivery_choice_text: value["homeDeliveryChoiceText"],
     step6a_title: value["step6aTitle"],
     step6a_text: value["step6aText"],
     step6b_title: value["step6bTitle"],
@@ -623,7 +662,6 @@ export function BestellWizardStringsToJSONTyped(
     step6b_checkbox_statute_associations:
       value["step6bCheckboxStatuteAssociations"],
     step6c_checkbox_statute: value["step6cCheckboxStatute"],
-    step6c_text_statute: value["step6cTextStatute"],
     step6c_checkbox_commitment: value["step6cCheckboxCommitment"],
     step6c_title: value["step6cTitle"],
     step6c_text: value["step6cText"],
@@ -647,6 +685,7 @@ export function BestellWizardStringsToJSONTyped(
     step14_text: value["step14Text"],
     step14b_title: value["step14bTitle"],
     step14b_text: value["step14bText"],
+    step14_back_to_website_button_text: value["step14BackToWebsiteButtonText"],
     privacy_policy_url: value["privacyPolicyUrl"],
     label_student_checkbox: value["labelStudentCheckbox"],
     student_checkbox_explanation_text: value["studentCheckboxExplanationText"],

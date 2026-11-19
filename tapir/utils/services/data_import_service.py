@@ -2,6 +2,7 @@ import io
 from dataclasses import dataclass, field
 from typing import Callable
 
+from django.core.management.base import OutputWrapper
 from django.db import transaction
 
 from tapir.utils.config import (
@@ -9,7 +10,6 @@ from tapir.utils.config import (
     MEMBER_IMPORT_STATUS_SKIPPED,
     MEMBER_IMPORT_STATUS_UPDATED,
 )
-from tapir.utils.exceptions import DryRunException
 from tapir.utils.services.member_importer import MemberImporter
 from tapir.utils.services.share_importer import ShareImporter
 from tapir.utils.services.subscription_importer import SubscriptionImporter
@@ -218,17 +218,10 @@ class DataImportService:
         if result.missing_columns:
             return result
 
-        keycloak_updates_before = MemberImporter.keycloak_updates_enabled
-        MemberImporter.keycloak_updates_enabled = not dry_run
-        try:
-            with transaction.atomic():
-                cls.import_rows(import_type, data, update_existing, result)
-                if dry_run or result.count(STATUS_ERROR):
-                    raise DryRunException()
-        except DryRunException:
-            pass
-        finally:
-            MemberImporter.keycloak_updates_enabled = keycloak_updates_before
+        with transaction.atomic():
+            cls.import_rows(import_type, data, update_existing, dry_run, result)
+            if dry_run or result.count(STATUS_ERROR):
+                transaction.set_rollback(True)
         return result
 
     @classmethod
@@ -237,6 +230,7 @@ class DataImportService:
         import_type: ImportType,
         data: TabularData,
         update_existing: bool,
+        dry_run: bool,
         result: ImportResult,
     ):
         for index, row in enumerate(data.rows):
@@ -248,16 +242,21 @@ class DataImportService:
                 for column in import_type.label_columns
                 if str(row.get(column, "")).strip()
             )
+            # Notes of the importer (e.g. an existing account that is kept) go into the row message
+            output = io.StringIO()
+            kwargs = {"row": row, "update_existing": update_existing}
+            if import_type.key == "members":
+                # The member importer leaves Keycloak alone in a dry run
+                kwargs.update(dry_run=dry_run, stdout=OutputWrapper(output))
             try:
                 with transaction.atomic():
-                    status = import_type.importer(
-                        row=row, update_existing=update_existing
-                    )
+                    status = import_type.importer(**kwargs)
                 result.rows.append(
                     RowResult(
                         line=line,
                         label=label,
                         status=STATUS_FROM_IMPORTER.get(status, STATUS_SKIPPED),
+                        message=output.getvalue().strip(),
                     )
                 )
             except Exception as error:
@@ -296,39 +295,38 @@ class DataImportService:
 
 
 class ActivationMailService:
-    """Keycloak logins and activation mails for imported members (like the command
-    send_verify_emails): members without login that have coop shares or a current or future
-    subscription."""
+    """Keycloak logins and activation mails for imported members: active members (as in
+    the "active members" mail segment) that have no login yet."""
 
     @staticmethod
-    def get_members_without_login():
-        from tapir.wirgarten.management.commands.send_verify_emails import (
-            Command as SendVerifyEmailsCommand,
+    def get_members_without_login(cache: dict):
+        from tapir.generic_exports.services.member_segment_provider import (
+            MemberSegmentProvider,
         )
 
         return (
-            SendVerifyEmailsCommand.get_members_with_at_least_one_share_or_one_relevant_subscription()
+            MemberSegmentProvider.get_queryset_active_members(cache=cache)
+            .filter(keycloak_id=None)
             .distinct()
             .order_by("member_no", "last_name")
         )
 
     @classmethod
-    def send(cls, actor) -> tuple[int, list[str]]:
+    def send(cls, actor, cache: dict) -> tuple[int, list[str]]:
         from tapir.accounts.services.email_verification_service import (
             EmailVerificationService,
         )
         from tapir.accounts.services.keycloak_user_manager import KeycloakUserManager
 
-        cache = {}
         sent = 0
         errors = []
-        for member in cls.get_members_without_login():
+        for member in cls.get_members_without_login(cache=cache):
             try:
                 KeycloakUserManager.create_keycloak_user_if_necessary(
-                    user=member, initial_password=None, cache=cache
+                    user=member, initial_password=None
                 )
                 EmailVerificationService.send_verification_email(
-                    user=member, actor=actor, cache=cache
+                    user=member, actor=actor
                 )
                 sent += 1
             except Exception as error:

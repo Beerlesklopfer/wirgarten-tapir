@@ -66,6 +66,9 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
   const [stoveSessionsByDay, setStoveSessionsByDay] = useState<
     Record<number, StoveSessionGrouped[]>
   >({});
+  const [breadsToBakeByDay, setBreadsToBakeByDay] = useState<
+    Record<number, Record<string, number>>
+  >({});
   const [previewByDay, setPreviewByDay] = useState<
     Record<number, SolverPreviewDetailResponse>
   >({});
@@ -98,8 +101,8 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
   };
 
   const handleApplied = () => {
-    setPreviewByDay({});
-    loadSolverResults();
+    // Keep the preview until the applied plan has loaded, otherwise the old plan flashes up.
+    void loadSolverResults().then(() => setPreviewByDay({}));
     loadAllPickupLists();
   };
 
@@ -111,7 +114,7 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
   const handleCheckToggle = (day: number, memberId: string) => {
     setCheckedByDay((prev) => ({
       ...prev,
-      [day]: { ...(prev[day] || {}), [memberId]: !prev[day]?.[memberId] },
+      [day]: { ...prev[day], [memberId]: !prev[day]?.[memberId] },
     }));
   };
 
@@ -129,10 +132,11 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
     setPreviewByDay({});
     setBreadCountsByDay({});
     setStoveSessionsByDay({});
+    setBreadsToBakeByDay({});
     setPickupListByDayByLocation({});
     setSelectedPickupLocationByDay({});
     setCheckedByDay({});
-    loadSolverResults();
+    void loadSolverResults();
     loadAllPickupLists();
   }, [year, week, initialDataLoaded, deliveryDays, allPickupLocations]);
 
@@ -156,9 +160,10 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
   };
 
   const loadSolverResults = () => {
-    if (deliveryDays.length === 0 || allPickupLocations.length === 0) return;
+    if (deliveryDays.length === 0 || allPickupLocations.length === 0)
+      return Promise.resolve();
     const requestedFor = `${year}/${week}`;
-    bakeryApi
+    const sessionsLoaded = bakeryApi
       .bakeryBreadsPerPickupLocationPerWeekList({ year, deliveryWeek: week })
       .then((allBreadCounts) => {
         if (isStale(requestedFor)) return;
@@ -167,7 +172,7 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
           const pl = allPickupLocations.find(
             (p) => p.id === String(entry.pickupLocation),
           );
-          if (!pl || pl.deliveryDay == null) continue;
+          if (pl?.deliveryDay == null) continue;
           countsByDay[pl.deliveryDay] ??= [];
           countsByDay[pl.deliveryDay].push({
             breadId: String(entry.bread),
@@ -203,9 +208,9 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
                 const sorted = Object.values(grouped).sort(
                   (a, b) => a.session - b.session,
                 );
-                sorted.forEach((s) =>
-                  s.layers.sort((a, b) => a.layer - b.layer),
-                );
+                for (const s of sorted) {
+                  s.layers.sort((a, b) => a.layer - b.layer);
+                }
                 return { day, sessions: sorted };
               })
               .catch(() => ({ day, sessions: [] as StoveSessionGrouped[] })),
@@ -226,6 +231,39 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
         if (isStale(requestedFor)) return;
         handleRequestError(error, "Fehler beim Laden der Backplanung");
       });
+
+    const breadsToBakeLoaded = Promise.all(
+      deliveryDays.map((day) =>
+        bakeryApi
+          .bakeryBreadsToBakePerWeekList({
+            year,
+            deliveryWeek: week,
+            deliveryDay: day,
+          })
+          .then((rows) => {
+            const quantities: Record<string, number> = {};
+            for (const row of rows) {
+              quantities[row.breadName] =
+                (quantities[row.breadName] || 0) + row.quantity;
+            }
+            return { day, quantities };
+          }),
+      ),
+    )
+      .then((results) => {
+        if (isStale(requestedFor)) return;
+        const byDay: Record<number, Record<string, number>> = {};
+        results.forEach(({ day, quantities }) => {
+          byDay[day] = quantities;
+        });
+        setBreadsToBakeByDay(byDay);
+      })
+      .catch((error) => {
+        if (isStale(requestedFor)) return;
+        handleRequestError(error, "Fehler beim Laden der Backplanung");
+      });
+
+    return Promise.all([sessionsLoaded, breadsToBakeLoaded]);
   };
 
   const loadAllPickupLists = () => {
@@ -266,6 +304,7 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
     const preview = previewByDay[day];
     const dayCounts = breadCountsByDay[day] || [];
     const daySessions = stoveSessionsByDay[day] || [];
+    const dayBreadsToBake = breadsToBakeByDay[day] || {};
 
     const breadDeliveries: Record<string, number> = {};
     const breadBaked: Record<string, number> = {};
@@ -281,13 +320,7 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
         breadDeliveries[c.breadName] =
           (breadDeliveries[c.breadName] || 0) + c.count;
       });
-      daySessions.forEach((s) =>
-        s.layers.forEach((l) => {
-          if (l.breadName)
-            breadBaked[l.breadName] =
-              (breadBaked[l.breadName] || 0) + l.quantity;
-        }),
-      );
+      Object.assign(breadBaked, dayBreadsToBake);
     }
 
     const allBreadNames = [
@@ -500,39 +533,6 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
                     />
                     <hr />
 
-                    <div className="mb-3">
-                      <SectionToggle
-                        isOpen={isSectionOpen(`metrics-${day}`)}
-                        onToggle={() => toggleSection(`metrics-${day}`)}
-                        title="Präferenz-Zufriedenheit"
-                        icon="favorite"
-                      />
-                      <p className="text-muted small mb-2">
-                        Wie gut entspricht der Backplan den Mitgliederwünschen?
-                      </p>
-                      {isSectionOpen(`metrics-${day}`) &&
-                        (d.displaySessions.length > 0 ? (
-                          <MetricsCard
-                            year={year}
-                            week={week}
-                            deliveryDay={day}
-                            csrfToken={csrfToken}
-                          />
-                        ) : (
-                          <p className="text-muted small text-center py-2">
-                            Noch kein Backplan berechnet.
-                          </p>
-                        ))}
-                    </div>
-                    <hr />
-
-                    <OvenPlanSection
-                      isOpen={isSectionOpen(`oven-plan-${day}`)}
-                      onToggle={() => toggleSection(`oven-plan-${day}`)}
-                      displaySessions={d.displaySessions}
-                    />
-                    <hr />
-
                     <DistributionListSection
                       isOpen={isSectionOpen(`distribution-list-${day}`)}
                       onToggle={() => toggleSection(`distribution-list-${day}`)}
@@ -572,6 +572,39 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
                       }
                       allPdfUrl={`/bakery/pdf/pickup-lists-all/${year}/${week}/${day}/`}
                       onEmail={() => {}}
+                    />
+                    <hr />
+
+                    <div className="mb-3">
+                      <SectionToggle
+                        isOpen={isSectionOpen(`metrics-${day}`)}
+                        onToggle={() => toggleSection(`metrics-${day}`)}
+                        title="Präferenz-Zufriedenheit"
+                        icon="favorite"
+                      />
+                      <p className="text-muted small mb-2">
+                        Wie gut entspricht der Backplan den Mitgliederwünschen?
+                      </p>
+                      {isSectionOpen(`metrics-${day}`) &&
+                        (d.displaySessions.length > 0 ? (
+                          <MetricsCard
+                            year={year}
+                            week={week}
+                            deliveryDay={day}
+                            csrfToken={csrfToken}
+                          />
+                        ) : (
+                          <p className="text-muted small text-center py-2">
+                            Noch kein Backplan berechnet.
+                          </p>
+                        ))}
+                    </div>
+                    <hr />
+
+                    <OvenPlanSection
+                      isOpen={isSectionOpen(`oven-plan-${day}`)}
+                      onToggle={() => toggleSection(`oven-plan-${day}`)}
+                      displaySessions={d.displaySessions}
                     />
                   </div>
                 </div>

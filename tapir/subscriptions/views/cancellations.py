@@ -1,3 +1,5 @@
+import datetime
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
@@ -18,6 +20,7 @@ from tapir.configuration.parameter import get_parameter_value
 from tapir.coop.services.coop_membership_cancellation_manager import (
     CoopMembershipCancellationManager,
 )
+from tapir.deliveries.services.get_deliveries_service import GetDeliveriesService
 from tapir.solidarity_contribution.services.member_solidarity_contribution_service import (
     MemberSolidarityContributionService,
 )
@@ -29,8 +32,14 @@ from tapir.subscriptions.serializers import (
 from tapir.subscriptions.services.product_cancellation_data_builder import (
     ProductCancellationDataBuilder,
 )
+from tapir.subscriptions.services.subscribed_products_service import (
+    SubscribedProductsService,
+)
 from tapir.subscriptions.services.subscription_cancellation_manager import (
     SubscriptionCancellationManager,
+)
+from tapir.subscriptions.services.subscription_delivered_in_week_checked import (
+    SubscriptionDeliveredInWeekChecker,
 )
 from tapir.subscriptions.services.trial_period_manager import TrialPeriodManager
 from tapir.utils.services.tapir_cache import TapirCache
@@ -42,6 +51,7 @@ from tapir.wirgarten.models import (
     SubscriptionChangeLogEntry,
     QuestionaireCancellationReasonResponse,
     ProductType,
+    Subscription,
 )
 from tapir.wirgarten.parameter_keys import ParameterKeys
 from tapir.wirgarten.service.products import (
@@ -54,7 +64,6 @@ from tapir.wirgarten.utils import (
     get_now,
     get_today,
     legal_status_is_cooperative,
-    legal_status_is_association,
 )
 
 
@@ -75,11 +84,8 @@ class GetCancellationDataView(APIView):
             and CoopMembershipCancellationManager.can_member_cancel_coop_membership(
                 member=member, reference_date=get_today(cache), cache=cache
             ),
-            "can_cancel_association_membership": legal_status_is_association(
-                cache=cache
-            )
-            and AssociationMembershipCancellationManager.does_member_have_a_cancellable_membership(
-                member=member, reference_date=get_today(cache=cache), cache=cache
+            "can_cancel_association_membership": AssociationMembershipCancellationManager.can_member_cancel_association_membership(
+                member=member, cache=cache
             ),
             "subscribed_products": ProductCancellationDataBuilder.build_data_for_all_products(
                 member=member, cache=cache
@@ -138,6 +144,7 @@ class GetCancellationDataView(APIView):
             return {
                 "exists": False,
                 "is_in_trial": False,
+                "is_negative": False,
                 "cancellation_date": today,
             }
 
@@ -149,6 +156,7 @@ class GetCancellationDataView(APIView):
                 )
                 for contribution in contributions
             ),
+            "is_negative": contributions.filter(amount__lt=0).exists(),
             "cancellation_date": SubscriptionCancellationManager.get_earliest_possible_cancellation_date_for_solidarity_contribution(
                 member=member, cache=cache
             ),
@@ -230,6 +238,13 @@ class CancelSubscriptionsView(APIView):
         custom_cancellation_reason: str | None,
         cancel_solidarity_contribution: bool,
     ):
+        is_trial_cancellation = any(
+            TrialPeriodManager.is_product_in_trial(
+                product=product, member=member, cache=self.cache
+            )
+            for product in products_selected_for_cancellation
+        )
+
         all_cancelled_subscriptions = []
         all_deleted_subscriptions = []
         for product in products_selected_for_cancellation:
@@ -245,22 +260,10 @@ class CancelSubscriptionsView(APIView):
             all_cancelled_subscriptions + all_deleted_subscriptions
         )
         if len(all_relevant_subscriptions) > 0:
-            all_relevant_subscriptions.sort(
-                key=lambda subscription: subscription.end_date, reverse=False
-            )
-            TransactionalTrigger.fire_action(
-                TransactionalTriggerData(
-                    key=Events.CONTRACT_CANCELLED,
-                    recipient_id_in_base_queryset=member.id,
-                    token_data={
-                        "contract_list": format_subscription_list_html(
-                            all_relevant_subscriptions
-                        ),
-                        "contract_end_date": format_date(
-                            all_relevant_subscriptions[-1].end_date
-                        ),
-                    },
-                ),
+            self._send_cancellation_mail(
+                member=member,
+                cancelled_subscriptions=all_relevant_subscriptions,
+                is_trial_cancellation=is_trial_cancellation,
             )
 
         if cancel_solidarity_contribution:
@@ -316,6 +319,67 @@ class CancelSubscriptionsView(APIView):
                 custom=True,
             )
 
+    def _send_cancellation_mail(
+        self,
+        member: Member,
+        cancelled_subscriptions: list[Subscription],
+        is_trial_cancellation: bool,
+    ):
+        contract_end_date = max(
+            subscription.end_date for subscription in cancelled_subscriptions
+        )
+        token_data = {
+            "contract_list": format_subscription_list_html(
+                sorted(
+                    cancelled_subscriptions,
+                    key=lambda subscription: subscription.end_date,
+                )
+            ),
+            "contract_end_date": format_date(contract_end_date),
+            "last_pickup_date": self._build_last_pickup_date(
+                member=member, contract_end_date=contract_end_date
+            ),
+        }
+
+        TransactionalTrigger.fire_action(
+            TransactionalTriggerData(
+                key=(
+                    Events.TRIAL_CANCELLATION
+                    if is_trial_cancellation
+                    else Events.CONTRACT_CANCELLED
+                ),
+                recipient_id_in_base_queryset=member.id,
+                token_data=token_data,
+            ),
+        )
+
+    def _build_last_pickup_date(
+        self, member: Member, contract_end_date: datetime.date
+    ) -> str:
+        deliveries = GetDeliveriesService.get_deliveries(
+            member=member,
+            date_from=get_today(cache=self.cache),
+            date_to=contract_end_date,
+            cache=self.cache,
+        )
+        pickups = [
+            delivery for delivery in deliveries if self._is_actual_pickup(delivery)
+        ]
+        if len(pickups) == 0:
+            return "Letzte Abholung schon vergangen"
+        return format_date(pickups[-1]["delivery_date"])
+
+    def _is_actual_pickup(self, delivery: dict) -> bool:
+        return any(
+            SubscriptionDeliveredInWeekChecker.is_subscription_delivered_in_week(
+                subscription=subscription,
+                delivery_date=delivery["delivery_date"],
+                cache=self.cache,
+                skip_donation_check=False,
+            )
+            for subscription in delivery["subscriptions"]
+        )
+
     def validate_everything(
         self,
         cancel_coop_membership: bool,
@@ -326,7 +390,7 @@ class CancelSubscriptionsView(APIView):
         custom_cancellation_reason: str | None,
         cancel_solidarity_contribution: bool,
     ):
-        subscribed_products = ProductCancellationDataBuilder.get_subscribed_products(
+        subscribed_products = SubscribedProductsService.get_subscribed_products(
             member=member, cache=self.cache
         )
 
@@ -385,6 +449,19 @@ class CancelSubscriptionsView(APIView):
             )
             if not contributions.exists():
                 raise ValidationError("Es kann kein Solidarbeitrag gekündigt werden.")
+
+        if (
+            not cancel_solidarity_contribution
+            and SubscriptionCancellationManager.negative_solidarity_contribution_must_be_cancelled(
+                member=member,
+                products_selected_for_cancellation=products_selected_for_cancellation,
+                cancel_association_membership=cancel_association_membership,
+                cache=self.cache,
+            )
+        ):
+            raise ValidationError(
+                "Der negative Solidarbeitrag muss gekündigt werden, wenn alle Verträge gekündigt werden."
+            )
 
     def validate_coop_membership_cancellation(
         self,

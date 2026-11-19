@@ -4,22 +4,23 @@ from tapir.configuration.parameter import get_parameter_value
 from tapir.deliveries.models import Joker
 from tapir.deliveries.services.joker_management_service import JokerManagementService
 from tapir.deliveries.services.joker_value_service import JokerValueService
-from tapir.deliveries.services.member_specific_delivery_day_calculator import (
-    MemberSpecificDeliveryDayCalculator,
-)
 from tapir.payments.models import MemberCredit
 from tapir.payments.services.intended_use_pattern_expander import (
     IntendedUsePatternExpander,
 )
-from tapir.utils.shortcuts import get_last_day_of_month, get_monday
+from tapir.utils.shortcuts import get_last_day_of_month
 from tapir.wirgarten.parameter_keys import ParameterKeys
-from tapir.wirgarten.service.get_next_delivery_date import get_next_delivery_date
 from tapir.wirgarten.utils import format_date
 
 
 class JokerCreditCreator:
     @classmethod
     def create_credits_for_jokers(cls, reference_date: datetime.date, cache: dict):
+        if not get_parameter_value(
+            key=ParameterKeys.JOKERS_CREATE_MEMBER_CREDITS, cache=cache
+        ):
+            return
+
         member_credits = [
             cls._build_credit_for_joker(
                 joker=joker, reference_date=reference_date, cache=cache
@@ -35,12 +36,10 @@ class JokerCreditCreator:
     def _build_credit_for_joker(
         cls, joker: Joker, reference_date: datetime.date, cache: dict
     ):
-        delivery_date = MemberSpecificDeliveryDayCalculator.get_specific_delivery_date(
-            member_id=joker.member.id,
-            delivery_date=get_next_delivery_date(get_monday(joker.date), cache=cache),
-            cache=cache,
+        delivery_date = JokerValueService.get_actual_delivery_date(
+            member_id=joker.member.id, joker_date=joker.date, cache=cache
         )
-        amount = JokerValueService.get_joker_credit_value_for_single_joker(
+        value_parts = JokerValueService.get_joker_credit_value_parts(
             member=joker.member, joker_date=joker.date, cache=cache
         )
         purpose = IntendedUsePatternExpander.expand_pattern_joker(
@@ -55,9 +54,10 @@ class JokerCreditCreator:
         return MemberCredit(
             member=joker.member,
             joker=joker,
-            amount=amount,
+            amount=JokerValueService.get_total_value(value_parts),
             due_date=get_last_day_of_month(reference_date),
             purpose=purpose,
-            comment=f"Joker eingesetzt für die Abholung/Lieferung am {format_date(delivery_date)}",
+            comment=f"Joker eingesetzt für die Abholung/Lieferung am {format_date(delivery_date)}\n"
+            f"{JokerValueService.build_explanation(value_parts)}",
             source="Joker",
         )

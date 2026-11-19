@@ -4,8 +4,10 @@ from tapir.deliveries.serializers import (
     SubscriptionSerializer,
 )
 from tapir.pickup_locations.serializers import (
+    DeliveryAddressSerializer,
     PublicPickupLocationSerializer,
     PickupLocationSerializer,
+    StoredDeliveryAddressSerializer,
 )
 from tapir.products.serializers import PublicProductSerializer, ProductSerializer
 from tapir.wirgarten.models import (
@@ -74,6 +76,7 @@ class WaitingListEntryDetailsSerializer(serializers.Serializer):
     link = serializers.URLField(required=False)
     payment_rhythm = serializers.CharField(required=False)
     can_be_fulfilled = serializers.BooleanField(required=False)
+    delivery_address = StoredDeliveryAddressSerializer()
 
 
 class PublicWaitingListEntryDetailsSerializer(serializers.Serializer):
@@ -89,6 +92,7 @@ class PublicWaitingListEntryDetailsSerializer(serializers.Serializer):
     postcode = serializers.CharField()
     city = serializers.CharField()
     country = serializers.CharField()
+    pseudonym = serializers.CharField(allow_blank=True)
     birthdate = serializers.DateField(required=False)
     account_owner = serializers.CharField(required=False)
     iban = serializers.CharField(required=False)
@@ -125,6 +129,7 @@ class WaitingListEntryUpdateSerializer(serializers.Serializer):
     desired_start_date = serializers.DateField(required=False)
     comment = serializers.CharField(allow_blank=True)
     category = serializers.CharField(required=False, allow_blank=True)
+    delivery_address = DeliveryAddressSerializer(required=False)
 
 
 class PublicWaitingListEntryExistingMemberCreateSerializer(serializers.Serializer):
@@ -141,6 +146,7 @@ class PublicConfirmWaitingListEntryRequestSerializer(serializers.Serializer):
     sepa_allowed = serializers.BooleanField()
     contract_accepted = serializers.BooleanField()
     number_of_coop_shares = serializers.IntegerField()
+    pay_coop_shares_in_instalments = serializers.BooleanField(default=False)
     payment_rhythm = serializers.CharField()
     solidarity_contribution = serializers.FloatField()
     association_membership_type_id = serializers.CharField(allow_null=True)

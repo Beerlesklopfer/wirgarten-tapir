@@ -12,6 +12,11 @@
  * Do not edit the class manually.
  */
 
+import type { DeliveryAddressRequest } from "./DeliveryAddressRequest";
+import {
+  DeliveryAddressRequestFromJSON,
+  DeliveryAddressRequestToJSON,
+} from "./DeliveryAddressRequest";
 import type { PersonalDataRequest } from "./PersonalDataRequest";
 import {
   PersonalDataRequestFromJSON,
@@ -66,6 +71,12 @@ export interface BestellWizardConfirmOrderRequestRequest {
    * @memberof BestellWizardConfirmOrderRequestRequest
    */
   numberOfCoopShares: number;
+  /**
+   *
+   * @type {boolean}
+   * @memberof BestellWizardConfirmOrderRequestRequest
+   */
+  payCoopSharesInInstalments?: boolean;
   /**
    *
    * @type {Array<string>}
@@ -132,6 +143,12 @@ export interface BestellWizardConfirmOrderRequestRequest {
    * @memberof BestellWizardConfirmOrderRequestRequest
    */
   associationMembershipTypeId?: string;
+  /**
+   *
+   * @type {DeliveryAddressRequest}
+   * @memberof BestellWizardConfirmOrderRequestRequest
+   */
+  deliveryAddress?: DeliveryAddressRequest;
 }
 
 /**
@@ -223,6 +240,10 @@ export function BestellWizardConfirmOrderRequestRequestFromJSONTyped(
     contractAccepted: json["contract_accepted"],
     statuteAccepted: json["statute_accepted"],
     numberOfCoopShares: json["number_of_coop_shares"],
+    payCoopSharesInInstalments:
+      json["pay_coop_shares_in_instalments"] == null
+        ? undefined
+        : json["pay_coop_shares_in_instalments"],
     pickupLocationIds: json["pickup_location_ids"],
     studentStatusEnabled: json["student_status_enabled"],
     paymentRhythm: json["payment_rhythm"],
@@ -237,6 +258,10 @@ export function BestellWizardConfirmOrderRequestRequestFromJSONTyped(
       json["association_membership_type_id"] == null
         ? undefined
         : json["association_membership_type_id"],
+    deliveryAddress:
+      json["delivery_address"] == null
+        ? undefined
+        : DeliveryAddressRequestFromJSON(json["delivery_address"]),
   };
 }
 
@@ -262,6 +287,7 @@ export function BestellWizardConfirmOrderRequestRequestToJSONTyped(
     contract_accepted: value["contractAccepted"],
     statute_accepted: value["statuteAccepted"],
     number_of_coop_shares: value["numberOfCoopShares"],
+    pay_coop_shares_in_instalments: value["payCoopSharesInInstalments"],
     pickup_location_ids: value["pickupLocationIds"],
     student_status_enabled: value["studentStatusEnabled"],
     payment_rhythm: value["paymentRhythm"],
@@ -273,5 +299,6 @@ export function BestellWizardConfirmOrderRequestRequestToJSONTyped(
     distribution_channels: value["distributionChannels"],
     feedback: value["feedback"],
     association_membership_type_id: value["associationMembershipTypeId"],
+    delivery_address: DeliveryAddressRequestToJSON(value["deliveryAddress"]),
   };
 }

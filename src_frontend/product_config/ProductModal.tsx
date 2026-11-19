@@ -60,6 +60,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [priceIsPerDelivery, setPriceIsPerDelivery] = useState(false);
   const [hiddenInBestellWizard, setHiddenInBestellWizard] = useState(false);
+  const [solidarityChoices, setSolidarityChoices] = useState("");
 
   useEffect(() => {
     if (!show) return;
@@ -89,11 +90,12 @@ const ProductModal: React.FC<ProductModalProps> = ({
         setShowMinCoopShares(extendedProduct.showMinCoopShares);
         setPriceIsPerDelivery(extendedProduct.pricePerDelivery);
         setHiddenInBestellWizard(extendedProduct.hiddenInBestellWizard);
+        setSolidarityChoices(extendedProduct.solidarityChoices);
       })
       .catch((error) =>
         handleRequestError(
           error,
-          "Fehler beim Laden der Produkt-Daten",
+          "Fehler beim Laden der Daten der Anteilsgröße",
           setToastDatas,
         ),
       )
@@ -122,6 +124,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
           capacity: capacity,
           minCoopShares: minCoopShares,
           hiddenInBestellWizard: hiddenInBestellWizard,
+          solidarityChoices: solidarityChoices,
         },
       })
       .then(() => location.reload())
@@ -158,18 +161,18 @@ const ProductModal: React.FC<ProductModalProps> = ({
             <Row>
               <Col>
                 <Form.Group>
-                  <Form.Label>Produkt Name</Form.Label>
+                  <Form.Label>Name der Anteilsgröße</Form.Label>
                   <Form.Control
                     value={productName}
                     onChange={(e) => setProductName(e.target.value)}
-                    placeholder={"Produkt Name"}
+                    placeholder={"Name der Anteilsgröße"}
                   />
                 </Form.Group>
               </Col>
               <Col>
                 <Form.Group>
                   <Form.Label htmlFor={"is_baseproduct"}>
-                    Ist Basisprodukt
+                    Ist Basis-Anteilsgröße
                   </Form.Label>
                   <Form.Check
                     checked={isBaseProduct}
@@ -212,8 +215,8 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     />
                   </Form.Group>
                   <Form.Text>
-                    Anzahl an Genossenschaftsanteile die gezeichnet werden
-                    müssen pro Anteil von dieses Produkt die bestellt werden.
+                    Anzahl an Genossenschaftsanteilen, die pro bestelltem Anteil
+                    dieser Anteilsgröße gezeichnet werden müssen.
                   </Form.Text>
                 </Col>
               )}
@@ -269,10 +272,34 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     label={"Wird in BestellWizard versteckt"}
                   />
                   <Form.Text>
-                    Produkte können im BestellWizard versteckt werden, so das
-                    normale Mitglieder die nicht mehr bestellen können. Diese
-                    Produkte können nur von Betrieb-Admins verteilt werden in
-                    dem sie Warteliste-Einträge erzeugen und erfüllen.
+                    Anteilsgrößen können im BestellWizard versteckt werden,
+                    sodass normale Mitglieder sie nicht mehr bestellen können.
+                    Diese Anteilsgrößen können nur von Betrieb-Admins verteilt
+                    werden, indem sie Warteliste-Einträge erzeugen und erfüllen.
+                  </Form.Text>
+                </Form.Group>
+              </Col>
+            </Row>
+            <Row className={"mt-2"}>
+              <Col>
+                <Form.Group controlId={"solidarity_choices"}>
+                  <Form.Label>Solidarbeitrag-Stufen</Form.Label>
+                  <Form.Control
+                    type={"text"}
+                    value={solidarityChoices}
+                    maxLength={512}
+                    pattern={String.raw`[\d\s.,\-]*`}
+                    onChange={(e) => setSolidarityChoices(e.target.value)}
+                  />
+                  <Form.Text>
+                    Komma-getrennte Beträge in €, z.B. "-10, 0, 10, 20".
+                    Nachkommastellen mit Punkt angeben, z.B. "2.5" für 2,50 €.
+                    Wenn ausgefüllt, ersetzen diese Stufen im BestellWizard die
+                    allgemeinen Solidarbeitrag-Stufen aus der Konfiguration,
+                    sobald diese Anteilsgröße bestellt wird. Der kleinste Wert
+                    ist dann der Mindestbeitrag, auch bei manueller Eingabe und
+                    bei Änderungen im Mitgliederbereich. Leer lassen, um die
+                    allgemeinen Stufen zu verwenden.
                   </Form.Text>
                 </Form.Group>
               </Col>
@@ -287,7 +314,9 @@ const ProductModal: React.FC<ProductModalProps> = ({
             <Row>
               <Col>
                 <Form.Group>
-                  <Form.Label>Größe (M-Anteil-Equivalent)</Form.Label>
+                  <Form.Label>
+                    Größe (im Verhältnis zur Basis-Anteilsgröße)
+                  </Form.Label>
                   <Form.Control
                     value={size}
                     type={"number"}
@@ -314,7 +343,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     }}
                   />
                   <Form.Text>
-                    Kapazitätsgrenze für dieses Produkt, als Vertragsanzahl.{" "}
+                    Kapazitätsgrenze für diese Anteilsgröße, als Vertragsanzahl.{" "}
                     Leer lassen für keine Grenze.
                   </Form.Text>
                 </Form.Group>
@@ -366,7 +395,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
   return (
     <Modal show={show} onHide={onHide} centered={true} size={"lg"}>
       <Modal.Header closeButton>
-        <h5 className={"mb-0"}>Produkt verwalten</h5>
+        <h5 className={"mb-0"}>Anteilsgröße bearbeiten</h5>
       </Modal.Header>
       {getModalBody()}
       <Modal.Footer>

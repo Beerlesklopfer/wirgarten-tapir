@@ -8,7 +8,7 @@
     font-weight: 300;
     font-display: swap;
     src: url(./fonts/fira-sans-v11-latin-300.woff2) format("woff2"),
-    url(./fonts/fira-sans-v11-latin-300.woff) format("woff");
+         url(./fonts/fira-sans-v11-latin-300.woff) format("woff");
 }
 
 @font-face {
@@ -17,7 +17,7 @@
     font-weight: 400;
     font-display: swap;
     src: url(/theme-fonts/akv/gardengrown-bcaps-webfont.woff2) format("woff2"),
-    url(/theme-fonts/akv/gardengrown-bcaps-webfont.woff) format("woff");
+         url(/theme-fonts/akv/gardengrown-bcaps-webfont.woff) format("woff");
 }
 
 :root {
