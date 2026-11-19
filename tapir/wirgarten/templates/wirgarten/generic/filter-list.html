@@ -119,7 +119,7 @@
         const sortOrders = {};
 
         sortHeaders.forEach(header => {
-            const sort = header.getAttribute('data-sort');
+            const sort = header.dataset.sort;
             const sortSymbol = document.createElement('span');
             sortSymbol.classList.add('sort-symbol');
             header.prepend(sortSymbol);
@@ -135,7 +135,7 @@
         if (sortField) sortField.parentElement.style.display = 'none';
 
         sortHeaders.forEach(header => {
-            const sort = header.getAttribute('data-sort');
+            const sort = header.dataset.sort;
 
             header.addEventListener('click', event => {
                 event.preventDefault();
@@ -154,7 +154,7 @@
                 sortForm.submit();
 
                 sortHeaders.forEach(header => {
-                    const headerSort = header.getAttribute('data-sort');
+                    const headerSort = header.dataset.sort;
                     const headerSortSymbol = header.querySelector('.sort-symbol');
                     headerSortSymbol.innerHTML = '';
                     if (sortOrders[headerSort]) {

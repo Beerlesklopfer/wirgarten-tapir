@@ -102,7 +102,7 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
 
   const handleApplied = () => {
     // Keep the preview until the applied plan has loaded, otherwise the old plan flashes up.
-    loadSolverResults().then(() => setPreviewByDay({}));
+    void loadSolverResults().then(() => setPreviewByDay({}));
     loadAllPickupLists();
   };
 
@@ -114,7 +114,7 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
   const handleCheckToggle = (day: number, memberId: string) => {
     setCheckedByDay((prev) => ({
       ...prev,
-      [day]: { ...(prev[day] || {}), [memberId]: !prev[day]?.[memberId] },
+      [day]: { ...prev[day], [memberId]: !prev[day]?.[memberId] },
     }));
   };
 
@@ -136,7 +136,7 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
     setPickupListByDayByLocation({});
     setSelectedPickupLocationByDay({});
     setCheckedByDay({});
-    loadSolverResults();
+    void loadSolverResults();
     loadAllPickupLists();
   }, [year, week, initialDataLoaded, deliveryDays, allPickupLocations]);
 
@@ -172,7 +172,7 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
           const pl = allPickupLocations.find(
             (p) => p.id === String(entry.pickupLocation),
           );
-          if (!pl || pl.deliveryDay == null) continue;
+          if (pl?.deliveryDay == null) continue;
           countsByDay[pl.deliveryDay] ??= [];
           countsByDay[pl.deliveryDay].push({
             breadId: String(entry.bread),
@@ -208,9 +208,9 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
                 const sorted = Object.values(grouped).sort(
                   (a, b) => a.session - b.session,
                 );
-                sorted.forEach((s) =>
-                  s.layers.sort((a, b) => a.layer - b.layer),
-                );
+                for (const s of sorted) {
+                  s.layers.sort((a, b) => a.layer - b.layer);
+                }
                 return { day, sessions: sorted };
               })
               .catch(() => ({ day, sessions: [] as StoveSessionGrouped[] })),
@@ -533,39 +533,6 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
                     />
                     <hr />
 
-                    <div className="mb-3">
-                      <SectionToggle
-                        isOpen={isSectionOpen(`metrics-${day}`)}
-                        onToggle={() => toggleSection(`metrics-${day}`)}
-                        title="Präferenz-Zufriedenheit"
-                        icon="favorite"
-                      />
-                      <p className="text-muted small mb-2">
-                        Wie gut entspricht der Backplan den Mitgliederwünschen?
-                      </p>
-                      {isSectionOpen(`metrics-${day}`) &&
-                        (d.displaySessions.length > 0 ? (
-                          <MetricsCard
-                            year={year}
-                            week={week}
-                            deliveryDay={day}
-                            csrfToken={csrfToken}
-                          />
-                        ) : (
-                          <p className="text-muted small text-center py-2">
-                            Noch kein Backplan berechnet.
-                          </p>
-                        ))}
-                    </div>
-                    <hr />
-
-                    <OvenPlanSection
-                      isOpen={isSectionOpen(`oven-plan-${day}`)}
-                      onToggle={() => toggleSection(`oven-plan-${day}`)}
-                      displaySessions={d.displaySessions}
-                    />
-                    <hr />
-
                     <DistributionListSection
                       isOpen={isSectionOpen(`distribution-list-${day}`)}
                       onToggle={() => toggleSection(`distribution-list-${day}`)}
@@ -605,6 +572,39 @@ export const Reports: React.FC<ReportsProps> = ({ csrfToken }) => {
                       }
                       allPdfUrl={`/bakery/pdf/pickup-lists-all/${year}/${week}/${day}/`}
                       onEmail={() => {}}
+                    />
+                    <hr />
+
+                    <div className="mb-3">
+                      <SectionToggle
+                        isOpen={isSectionOpen(`metrics-${day}`)}
+                        onToggle={() => toggleSection(`metrics-${day}`)}
+                        title="Präferenz-Zufriedenheit"
+                        icon="favorite"
+                      />
+                      <p className="text-muted small mb-2">
+                        Wie gut entspricht der Backplan den Mitgliederwünschen?
+                      </p>
+                      {isSectionOpen(`metrics-${day}`) &&
+                        (d.displaySessions.length > 0 ? (
+                          <MetricsCard
+                            year={year}
+                            week={week}
+                            deliveryDay={day}
+                            csrfToken={csrfToken}
+                          />
+                        ) : (
+                          <p className="text-muted small text-center py-2">
+                            Noch kein Backplan berechnet.
+                          </p>
+                        ))}
+                    </div>
+                    <hr />
+
+                    <OvenPlanSection
+                      isOpen={isSectionOpen(`oven-plan-${day}`)}
+                      onToggle={() => toggleSection(`oven-plan-${day}`)}
+                      displaySessions={d.displaySessions}
                     />
                   </div>
                 </div>
