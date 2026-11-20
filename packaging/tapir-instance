@@ -510,7 +510,7 @@ from allauth.socialaccount.models import SocialAccount
 from tapir.accounts.models import TapirUser
 from tapir.accounts.services.keycloak_user_manager import KeycloakUserManager
 email, password, admin = '$email', '$password', $( [ "$admin" = true ] && echo True || echo False )
-client = KeycloakUserManager.get_keycloak_client({})
+client = KeycloakUserManager.get_keycloak_client()
 user = TapirUser.objects.filter(email=email).first()
 if user is None:
     user = TapirUser.objects.create(email=email, username=email, first_name='${first:-Admin}', last_name='${last:-Tapir}', is_staff=admin, is_superuser=admin)
@@ -525,7 +525,7 @@ if user.keycloak_id and not client.get_user_id(email):
 if user.keycloak_id:
     print('exists')
 else:
-    KeycloakUserManager.create_keycloak_user_if_necessary(user=user, initial_password=password, cache={})
+    KeycloakUserManager.create_keycloak_user_if_necessary(user=user, initial_password=password)
     print('created')
 " 2>&1 | grep -v '^Tapir Version' | tail -n 1 || true)"
     case "$result" in
@@ -576,7 +576,7 @@ cache.set('tapir-instance-check', 1, 10)
 assert cache.get('tapir-instance-check') == 1"
     check "Tapir reaches the Keycloak admin API" tapir_shell "$name" "
 from tapir.accounts.services.keycloak_user_manager import KeycloakUserManager
-KeycloakUserManager.get_keycloak_client({}).get_users({'max': 1})"
+KeycloakUserManager.get_keycloak_client().get_users({'max': 1})"
     if [ "${NGINX_ACTIVE:-false}" = true ]; then
         check "https://$domain/realms/$realm through nginx" \
             curl -fsk -o /dev/null --max-time 20 --resolve "$domain:443:127.0.0.1" "https://$domain/realms/$realm"
